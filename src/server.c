@@ -70,10 +70,10 @@ void send_response(int client_fd, const char *status, const char *content_type, 
 
 void handle_client(int client_fd, const char *www_folder){
 
-    char buffer[HTTP_SIZE];
+    char buffer[BUF_SIZE];
     memset(buffer,0,HTTP_SIZE);
 
-    ssize_t bytes_read = read(client_fd,buffer,HTTP_SIZE-1);
+    ssize_t bytes_read = read(client_fd,buffer,BUF_SIZE-1);
     if(bytes_read <=0){
         close(client_fd);
         fprintf(stderr,"bytes_read failed\n");
@@ -87,7 +87,15 @@ void handle_client(int client_fd, const char *www_folder){
 
     switch (parse_result) {
         case TEST_ERROR_NONE:
-            break;
+            if(
+                    (strcmp(request.http_method, GET)==0 || strcmp(request.http_method,POST)==0 || strcmp(request.http_method,HEAD)==0)
+                    && (strcmp(request.http_version,HTTP_VER)==0)
+            ){
+                break;
+            }else{
+                send_response(client_fd, BAD_REQUEST, "text/plain", "Request incomplete", NULL);
+                return;
+            }
         case TEST_ERROR_PARSE_PARTIAL:
             send_response(client_fd, BAD_REQUEST, "text/plain", "Request incomplete", NULL);
             return;
@@ -107,27 +115,32 @@ void handle_client(int client_fd, const char *www_folder){
 
     }
 
-    char full_path[4096];
-    memset(full_path,0,HTTP_SIZE);
-    snprintf(full_path, sizeof(full_path), "%s%s", www_folder, request.http_uri);
-
-    fprintf(stderr,"%s\n",full_path);
-
-    struct stat file_stat;
-    if (stat(full_path, &file_stat) == -1) {
-        send_response(client_fd, NOT_FOUND, HTML_MIME, "<h1>File not found.</h1>", NULL);
-        return;
-    }
-
-    char last_modified[64];
-    struct tm *gmt = gmtime(&file_stat.st_mtime);
-    strftime(last_modified, sizeof(last_modified), "%a, %d %b %Y %H:%M:%S GMT", gmt);
-
 
 
     switch (request.http_method[0]) {
         case 'G':
             if (strcmp(request.http_method, GET) == 0) {
+                char full_path[4096];
+                memset(full_path,0,HTTP_SIZE);
+                if (strcmp(request.http_uri, "/") == 0) {
+                    // If the request is to the root, append /index.html
+                    snprintf(full_path, sizeof(full_path), "%s/index.html", www_folder);
+                } else {
+                    // Otherwise, use the requested URI directly
+                    snprintf(full_path, sizeof(full_path), "%s%s", www_folder, request.http_uri);
+                }
+
+                fprintf(stderr,"%s\n",full_path);
+
+                struct stat file_stat;
+                if (stat(full_path, &file_stat) == -1) {
+                    send_response(client_fd, NOT_FOUND, HTML_MIME, "<h1>File not found.</h1>", NULL);
+                    return;
+                }
+
+                char last_modified[64];
+                struct tm *gmt = gmtime(&file_stat.st_mtime);
+                strftime(last_modified, sizeof(last_modified), "%a, %d %b %Y %H:%M:%S GMT", gmt);
                 int file_fd = open(full_path, O_RDONLY);
                 if (file_fd == -1) {
                     send_response(client_fd, BAD_REQUEST, "text/plain", "Unable to open file.", NULL);
@@ -153,7 +166,7 @@ void handle_client(int client_fd, const char *www_folder){
                 free(headers);
 
                 // Send file content in chunks
-                char file_buffer[HTTP_SIZE];
+                char file_buffer[BUF_SIZE];
                 memset(file_buffer,0,HTTP_SIZE);
                 ssize_t file_bytes_read;
                 while ((file_bytes_read = read(file_fd, file_buffer, sizeof(file_buffer))) > 0) {
@@ -175,6 +188,27 @@ void handle_client(int client_fd, const char *www_folder){
         case 'H':
             fprintf(stderr,"Call header\n");
             if (strcmp(request.http_method, HEAD) == 0) {
+                char full_path[4096];
+                memset(full_path,0,HTTP_SIZE);
+                if (strcmp(request.http_uri, "/") == 0) {
+                    // If the request is to the root, append /index.html
+                    snprintf(full_path, sizeof(full_path), "%s/index.html", www_folder);
+                } else {
+                    // Otherwise, use the requested URI directly
+                    snprintf(full_path, sizeof(full_path), "%s%s", www_folder, request.http_uri);
+                }
+
+                fprintf(stderr,"%s\n",full_path);
+
+                struct stat file_stat;
+                if (stat(full_path, &file_stat) == -1) {
+                    send_response(client_fd, NOT_FOUND, HTML_MIME, "<h1>File not found.</h1>", NULL);
+                    return;
+                }
+
+                char last_modified[64];
+                struct tm *gmt = gmtime(&file_stat.st_mtime);
+                strftime(last_modified, sizeof(last_modified), "%a, %d %b %Y %H:%M:%S GMT", gmt);
 
                 // Get MIME type
                 const char *mime_type = get_mime_type(full_path);
@@ -185,7 +219,59 @@ void handle_client(int client_fd, const char *www_folder){
             break;
         case 'P': // POST
             if (strcmp(request.http_method, POST) == 0) {
-                send_response(client_fd, OK, "text/plain", request.body ? request.body : "", NULL);
+                // Find Content-Length and Content-Type headers
+                size_t content_length = 0;
+                char *content_type = "text/plain"; // Default content type
+
+                for (int i = 0; i < request.header_count; ++i) {
+                    fprintf(stderr,"%s\n",request.headers[i].header_name);
+                    fprintf(stderr,"%s\n",request.headers[i].header_value);
+                    fprintf(stderr,"================================\n");
+                    if (strcasecmp(request.headers[i].header_name, "Content-Length") == 0) {
+                        content_length = (size_t)atoi(request.headers[i].header_value);
+                    } else if (strcasecmp(request.headers[i].header_name, "Content-Type") == 0) {
+                        content_type = request.headers[i].header_value; // Get Content-Type from request
+                    }
+                }
+
+                if (content_length == 0) {
+                    send_response(client_fd, BAD_REQUEST, "text/plain", "Missing or invalid Content-Length header.", NULL);
+                    return;
+                }
+
+                if (request.body == NULL) {
+                    send_response(client_fd, BAD_REQUEST, "text/plain", "Missing body in the POST request.", NULL);
+                    return;
+                }
+
+                // Send response headers
+                char content_length_str[32];
+                snprintf(content_length_str, sizeof(content_length_str), "%ld", content_length);
+                char *headers;
+                size_t headers_len;
+                serialize_http_response(&headers, &headers_len, OK, content_type, content_length_str, NULL, 0, NULL);
+
+                if (write(client_fd, headers, headers_len) != headers_len) {
+                    fprintf(stderr, "Error writing headers to client\n");
+                    free(headers);
+                    close(client_fd);
+                    return;
+                }
+                free(headers);
+
+                // Send the body as received from the request in chunks
+                ssize_t bytes_written = 0;
+                while (bytes_written < content_length) {
+                    ssize_t chunk_size = (content_length - bytes_written) > HTTP_SIZE ? HTTP_SIZE : (content_length - bytes_written);
+                    ssize_t current_bytes_written = write(client_fd, request.body + bytes_written, chunk_size);
+                    if (current_bytes_written <= 0) {
+                        fprintf(stderr, "Error writing body content to client\n");
+                        break;
+                    }
+                    bytes_written += current_bytes_written;
+                }
+
+                close(client_fd);
             }
             break;
 
@@ -195,11 +281,6 @@ void handle_client(int client_fd, const char *www_folder){
 
 
     }
-
-
-
-
-
 
 
 }
