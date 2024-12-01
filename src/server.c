@@ -79,7 +79,7 @@ void handle_get_header(Request* request,int client_fd,const char *www_folder){
         snprintf(full_path, sizeof(full_path), "%s%s", www_folder, request->http_uri);
     }
 
-    fprintf(stderr, "%s\n", full_path);
+    //fprintf(stderr, "%s\n", full_path);
 
     struct stat file_stat;
     if (stat(full_path, &file_stat) == -1) {
@@ -89,11 +89,17 @@ void handle_get_header(Request* request,int client_fd,const char *www_folder){
 
     if (S_ISDIR(file_stat.st_mode)) {
         snprintf(full_path, sizeof(full_path), "%s%s/index.html", www_folder, request->http_uri);
+        if (stat(full_path, &file_stat) == -1) {
+            send_response(client_fd, NOT_FOUND, HTML_MIME, "<h1>File not found.</h1>", NULL);
+            return;
+        }
     }
+    fprintf(stderr, "%s\n", full_path);
 
     char last_modified[64];
     struct tm *gmt = gmtime(&file_stat.st_mtime);
     strftime(last_modified, sizeof(last_modified), "%a, %d %b %Y %H:%M:%S GMT", gmt);
+
     int file_fd = open(full_path, O_RDONLY);
     if (file_fd == -1) {
         send_response(client_fd, BAD_REQUEST, "text/plain", "Unable to open file.", NULL);
