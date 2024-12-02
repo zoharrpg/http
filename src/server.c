@@ -64,7 +64,6 @@ void send_response(int client_fd, const char *status, const char *content_type, 
 
     write(client_fd, response, response_len);
     free(response);
-    close(client_fd);
 
 }
 
@@ -125,7 +124,6 @@ void handle_get_header(Request* request,int client_fd,const char *www_folder){
         fprintf(stderr, "Error writing headers to client\n");
         free(headers);
         close(file_fd);
-        close(client_fd);
         return;
     }
     free(headers);
@@ -145,7 +143,6 @@ void handle_get_header(Request* request,int client_fd,const char *www_folder){
         fprintf(stderr, "Error reading file\n");
     }
     close(file_fd);
-    close(client_fd);
 }
 
 void handle_post(Request* request,int client_fd,const char *www_folder){
@@ -169,7 +166,6 @@ void handle_post(Request* request,int client_fd,const char *www_folder){
     }
 
     free(response);
-    close(client_fd);
 
 
 }
@@ -180,7 +176,7 @@ void handle_client(int client_fd, const char *www_folder) {
     ssize_t bytes_read;
 
     while (1) {
-        memset(buffer, 0, HTTP_SIZE);
+        memset(buffer, 0, BUF_SIZE);
 
         bytes_read = read(client_fd, buffer, BUF_SIZE - 1);
         if (bytes_read <= 0) {
