@@ -350,7 +350,9 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                 fprintf(stderr,"content size is %ld\n",context->content_size);
                 fprintf(stderr,"body size is %ld\n",context->body_size);
                 bool is_close = handle_request(&request,client_fd,www_folder,context);
-                fprintf(stderr,"Correct here2\n");
+
+                fprintf(stderr,"Correct here22\n");
+
                 return is_close;
 
             }else{
