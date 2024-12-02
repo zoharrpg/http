@@ -273,7 +273,7 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
     }
     char *close_state = get_header_value(request,CONNECTION_STR);
     bool close_result = false;
-    if(strcasecmp(close_state,CLOSE)==0){
+    if(close_state && strcasecmp(close_state,CLOSE)==0){
         fprintf(stderr,"compare successful\n");
         close_result = true;
     }else{
@@ -350,6 +350,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                 fprintf(stderr,"content size is %ld\n",context->content_size);
                 fprintf(stderr,"body size is %ld\n",context->body_size);
                 bool is_close = handle_request(&request,client_fd,www_folder,context);
+                fprintf(stderr,"Correct here2\n");
                 return is_close;
 
             }else{
@@ -404,6 +405,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
 int main(int argc, char *argv[]) {
     /* Validate and parse args */
+//    fprintf(stderr,"Correct here\n");
     if (argc != 2) {
         fprintf(stderr, "usage: %s <www-folder>\n", argv[0]);
         return EXIT_FAILURE;
@@ -458,13 +460,13 @@ int main(int argc, char *argv[]) {
     http_context  request_storage[MAX_CONNECTIONS+1];
 
 
-
     while (true) {
         int poll_count = poll(fds, nfds, CONNECTION_TIMEOUT * 1000);
         if (poll_count == -1) {
             perror("Poll failed");
             break;
         }
+
 
         for (int i = 0; i < nfds; i++) {
             if (fds[i].revents & POLLIN) {
