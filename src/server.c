@@ -292,6 +292,7 @@ int main(int argc, char *argv[]) {
 
     fds[0].fd = server_fd;
     fds[0].events = POLLIN | POLLHUP;
+    fds[0].revents = 0;
     int nfds = 1;
 
 
@@ -322,7 +323,8 @@ int main(int argc, char *argv[]) {
                     }
 
                     fds[nfds].fd = client_fd;
-                    fds[nfds].events = POLLIN;
+                    fds[nfds].events = POLLIN | POLLHUP | POLLERR;
+                    fds[nfds].revents = 0;
                     nfds++;
                 } else {
                     // Handle client request
@@ -330,10 +332,12 @@ int main(int argc, char *argv[]) {
 
                     // Remove client from poll array
                 }
-            } else if (fds[i].revents & POLLHUP) {
+            } else if (fds[i].revents & POLLHUP ||fds[i].revents & POLLERR ) {
+                fprintf(stderr,"poll handle close\n");
                 fds[i] = fds[nfds - 1];
                 nfds--;
                 i--;
+
             }
         }
     }
