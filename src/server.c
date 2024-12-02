@@ -206,39 +206,13 @@ void handle_client(int client_fd, const char *www_folder) {
     Request request;
     memset(&request, 0, sizeof(Request));
 
-    test_error_code_t parse_result =
-        parse_http_request(buffer, bytes_read, &request);
-
-    // switch (parse_result) {
-    //     case TEST_ERROR_NONE:
-    //         if (strcmp(request.http_version, HTTP_VER) == 0) {
-    //             break;
-    //         } else {
-    //             send_response(client_fd, BAD_REQUEST, "text/plain", "Request
-    //             incomplete", NULL); continue;
-    //         }
-    //     case TEST_ERROR_PARSE_PARTIAL:
-    //         send_response(client_fd, BAD_REQUEST, "text/plain", "Request
-    //         incomplete", NULL); continue;
-    //     case TEST_ERROR_PARSE_FAILED:
-    //         send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed
-    //         request", NULL); continue;
-    //     case TEST_ERROR_HTTP_CONNECT_FAILED:
-    //         send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed
-    //         request", NULL); continue;
-    //     case TEST_ERROR_HTTP_SEND_FAILED:
-    //         send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed
-    //         request", NULL); continue;
-    //     default:
-    //         send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed
-    //         request", NULL); continue;
-    // }
+    test_error_code_t parse_result = parse_http_request(buffer, bytes_read, &request);
 
     if (parse_result == TEST_ERROR_NONE) {
       bool close_connection = false;
       for (int i = 0; i < request.header_count; i++) {
-        fprintf(stderr, "Header: %s: %s -- %s\n", request.headers[i].header_name,
-                request.headers[i].header_value,CONNECTION);
+        fprintf(stderr, "Header: %s: %s \n", request.headers[i].header_name,
+                request.headers[i].header_value);
         if (strcasecmp(request.headers[i].header_name, "Connection") == 0 &&
             strcasecmp(request.headers[i].header_value, "close") == 0) {
           close_connection = true;
@@ -324,7 +298,7 @@ int main(int argc, char *argv[]) {
   int nfds = 1;
 
   while (true) {
-    int poll_count = poll(fds, nfds, CONNECTION_TIMEOUT * 1000);
+    int poll_count = poll(fds, nfds, CONNECTION_TIMEOUT);
     if (poll_count == -1) {
       fprintf(stderr, "Poll failed\n");
       break;
@@ -344,6 +318,7 @@ int main(int argc, char *argv[]) {
             send_response(client_fd, SERVICE_UNAVAILABLE, HTML_MIME,
                           "<p>Server is overloaded. Try again later.</p>",
                           NULL);
+                          close(client_fd);
             continue; // client_fd is closed in send_response
           }
 
@@ -357,6 +332,7 @@ int main(int argc, char *argv[]) {
           // Remove client from poll array
           fds[i] = fds[nfds - 1];
           nfds--;
+          i--;
         }
       }
     }
