@@ -288,7 +288,7 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
     return close_result;
 }
 
-bool handle_client(int client_fd, const char *www_folder,http_context* context) {
+bool handle_client(int client_fd, const char *www_folder,http_context* context,int nfds) {
     char buffer[BUF_SIZE];
     memset(buffer, 0, BUF_SIZE);
 
@@ -299,10 +299,11 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context) 
             return false;
         } else {
             fprintf(stderr,"read failed");
+            return true;
         }
-        return true;
          // Indicate that the connection should be closed
     }
+    fprintf(stderr,"The nfds is %d\n",nfds);
 
     if(!context->header_received){
         char *new_buffer = realloc(context->request_buffer, context->request_header_size + context->body_size + bytes_read);
@@ -450,70 +451,70 @@ int main(int argc, char *argv[]) {
 
 
     while (true) {
-        int poll_count = poll(fds, nfds, CONNECTION_TIMEOUT);
+        int poll_count = poll(fds, nfds, CONNECTION_TIMEOUT * 1000);
         if (poll_count == -1) {
-            fprintf(stderr, "Poll failed\n");
+            perror("Poll failed");
             break;
         }
 
         for (int i = 0; i < nfds; i++) {
-
             if (fds[i].revents & POLLIN) {
+                fds[i].revents = 0; // Clear the event
+
                 if (fds[i].fd == server_fd) {
-                    // Accept new client connection
-                    int client_fd = accept(server_fd, NULL, NULL);
-                    if (client_fd == -1) {
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) {// No pending connections, continue polling
-                            continue;
-                        }else{
-                            fprintf(stderr, "Accept failed\n");
+                    // Accept all pending connections
+                    while (true) {
+                        int client_fd = accept(server_fd, NULL, NULL);
+                        if (client_fd == -1) {
+                            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                                break; // No more pending connections
+                            } else {
+                                perror("accept failed");
+                                break;
+                            }
+                        }
+
+                        make_socket_non_blocking(client_fd);
+
+                        if (nfds-1 >= MAX_CONNECTIONS) {
+                            send_response(client_fd, SERVICE_UNAVAILABLE, HTML_MIME,
+                                          "<p>Server is overloaded. Try again later.</p>", NULL);
+                            close(client_fd);
                             continue;
                         }
+
+                        fds[nfds].fd = client_fd;
+                        fds[nfds].events = POLLIN | POLLHUP | POLLERR;
+                        request_storage[nfds].request_buffer = NULL;
+                        request_storage[nfds].request_header_size = 0;
+                        request_storage[nfds].body_size = 0;
+                        request_storage[nfds].content_size = 0;
+                        request_storage[nfds].header_received = false;
+
+                        fprintf(stderr, "New client initialized at index %d\n", nfds);
+                        nfds++;
                     }
-
-                    make_socket_non_blocking(client_fd);
-
-                    if (nfds - 1 >= MAX_CONNECTIONS) {
-                        send_response(client_fd, SERVICE_UNAVAILABLE, HTML_MIME,
-                                      "<p>Server is overloaded. Try again later.</p>",
-                                      NULL);
-                        close(client_fd);
-                        continue; // client_fd is closed in send_response
-                    }
-
-                    fds[nfds].fd = client_fd;
-                    fds[nfds].events = POLLIN | POLLHUP | POLLERR;
-                    request_storage[nfds].request_buffer =NULL;
-                    request_storage[nfds].request_header_size = 0;
-                    request_storage[nfds].body_size = 0;
-                    request_storage[nfds].content_size=0;
-                    request_storage[nfds].header_received = false;
-                    fprintf(stderr,"initial client index is %d\n",i);
-                    nfds++;
-
-
                 } else {
                     // Handle client request
-//                    fprintf(stderr,"Correct here\n");
-//                    fprintf(stderr,"handle client index is %d\n",i);
-                    bool is_close = handle_client(fds[i].fd, www_folder,&request_storage[i]);
-                    if(is_close){
+                    bool is_close = handle_client(fds[i].fd, www_folder, &request_storage[i],nfds);
+                    if (is_close) {
+                        fprintf(stderr, "Closing client at index %d\n", i);
                         close(fds[i].fd);
+                        reset_context(&request_storage[i]);
                         fds[i] = fds[nfds - 1];
+                        request_storage[i] = request_storage[nfds - 1];
                         nfds--;
                         i--;
                     }
-
-                    // Remove client from poll array
                 }
-            } else if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR ) {
-                fprintf(stderr,"error handling \n");
+            } else if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR) {
+                fprintf(stderr, "Error or hangup on client at index %d\n", i);
                 reset_context(&request_storage[i]);
                 close(fds[i].fd);
                 fds[i] = fds[nfds - 1];
+                request_storage[i] = request_storage[nfds - 1];
                 nfds--;
                 i--;
-
             }
         }
     }
