@@ -237,7 +237,9 @@ void handle_client(int client_fd, const char *www_folder) {
     if (parse_result == TEST_ERROR_NONE) {
       bool close_connection = false;
       for (int i = 0; i < request.header_count; i++) {
-        if (strcasecmp(request.headers[i].header_name, CONNECTION) == 0 &&
+        fprintf(stderr, "Header: %s: %s -- %s\n", request.headers[i].header_name,
+                request.headers[i].header_value,CONNECTION);
+        if (strcasecmp(request.headers[i].header_name, "Connection") == 0 &&
             strcasecmp(request.headers[i].header_value, "close") == 0) {
           close_connection = true;
           break;
