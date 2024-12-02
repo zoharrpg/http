@@ -218,24 +218,25 @@ void handle_post(Request *request, int client_fd,http_context* context) {
     // implement the handle post just echo the request body, also implement the
     // large post request in the client Extract the Content-Length header to
     // determine the body size Extract the body from the request
-    char *body = request->body;
-    size_t body_len = context->body_size;
 
-    // Prepare the response headers
-    char content_length[32];
-    snprintf(content_length, sizeof(content_length), "%ld", body_len);
+//    char *body = request->body;
+//    size_t body_len = context->body_size;
+//    size_t total_size = sizeof(Request) + (request->body ? strlen(request->body) : 0);
+//
+//    // Prepare the response headers
+//    char content_length[32];
+//    snprintf(content_length, sizeof(content_length), "%ld", body_len);
 
     // Send the response
-    char *response;
-    size_t response_len;
-    serialize_http_response(&response, &response_len, OK, get_header_value(request,"Content-Type"),
-                            content_length, NULL, body_len, body);
+//    char *response;
+//    size_t response_len;
+//    serialize_http_response(&response, &response_len, OK, get_header_value(request,"Content-Type"),
+//                            content_length, NULL, body_len, body);
 
-    if (write(client_fd, response, response_len) != response_len) {
+    if (write(client_fd, context->request_buffer,context->request_header_size + context->body_size ) != context->request_header_size + context->body_size ) {
         fprintf(stderr, "Error writing response to client\n");
     }
 
-    free(response);
 }
 
 bool handle_request(Request *request, int client_fd, const char *www_folder,http_context* context){
