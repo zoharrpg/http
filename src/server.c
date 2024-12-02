@@ -216,16 +216,29 @@ void handle_client(int client_fd, const char *www_folder) {
                 break;
             }
         }
-
-        if (strcmp(request.http_method, GET) == 0 ||
-            strcmp(request.http_method, HEAD) == 0) {
-            handle_get_header(&request, client_fd, www_folder);
-        } else if (strcmp(request.http_method, POST) == 0) {
-            handle_post(&request, client_fd, www_folder);
-        } else {
+        if(strcmp(request.http_version,HTTP_VER)!=0) {
             send_response(client_fd, BAD_REQUEST, "text/plain",
-                          "Method wrong problem", NULL);
+                          "Wrong HTTP version", NULL);
+            if (close_connection) {
+                fprintf(stderr, "Closing connection based on the Connection close\n");
+                close(client_fd);
+                return;
+            }
+
         }
+
+
+            if (strcmp(request.http_method, GET) == 0 ||strcmp(request.http_method, HEAD) == 0) {
+
+                handle_get_header(&request, client_fd, www_folder);
+            } else if (strcmp(request.http_method, POST) == 0) {
+                handle_post(&request, client_fd, www_folder);
+            } else {
+                send_response(client_fd, BAD_REQUEST, "text/plain",
+                              "Method wrong problem", NULL);
+                //close(client_fd);
+            }
+
 
         // Check if the connection should be closed
 
@@ -234,6 +247,7 @@ void handle_client(int client_fd, const char *www_folder) {
             close(client_fd);
             return;
         }
+
     } else {
         send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request",
                       NULL);
@@ -324,7 +338,6 @@ int main(int argc, char *argv[]) {
 
                     fds[nfds].fd = client_fd;
                     fds[nfds].events = POLLIN | POLLHUP | POLLERR;
-                    fds[nfds].revents = 0;
                     nfds++;
                 } else {
                     // Handle client request
@@ -332,7 +345,7 @@ int main(int argc, char *argv[]) {
 
                     // Remove client from poll array
                 }
-            } else if (fds[i].revents & POLLHUP ||fds[i].revents & POLLERR ) {
+            } else if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR ) {
                 fprintf(stderr,"poll handle close\n");
                 fds[i] = fds[nfds - 1];
                 nfds--;
