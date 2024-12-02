@@ -232,10 +232,14 @@ void handle_post(Request *request, int client_fd,http_context* context) {
 //    size_t response_len;
 //    serialize_http_response(&response, &response_len, OK, get_header_value(request,"Content-Type"),
 //                            content_length, NULL, body_len, body);
+    fprintf(stderr,"post header size is %ld\n",context->request_header_size);
+    size_t  write_byte = write(client_fd, context->request_buffer,context->request_header_size + context->body_size );
 
-    if (write(client_fd, context->request_buffer,context->request_header_size + context->body_size ) != context->request_header_size + context->body_size ) {
+    if ( write_byte != context->request_header_size + context->body_size ) {
         fprintf(stderr, "Error writing response to client\n");
     }
+    fprintf(stderr,"after post header size is %ld\n",context->request_header_size);
+    fprintf(stderr,"after post write size is %ld\n",write_byte);
 
 }
 
@@ -292,11 +296,12 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context) 
 
     if (bytes_read <= 0) {
         if (bytes_read == 0) {
-            fprintf(stderr, "Client disconnected.\n");
+            return false;
         } else {
             fprintf(stderr,"read failed");
         }
-        return true; // Indicate that the connection should be closed
+        return true;
+         // Indicate that the connection should be closed
     }
 
     if(!context->header_received){
@@ -502,7 +507,9 @@ int main(int argc, char *argv[]) {
                     // Remove client from poll array
                 }
             } else if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR ) {
+                fprintf(stderr,"error handling \n");
                 reset_context(&request_storage[i]);
+                close(fds[i].fd);
                 fds[i] = fds[nfds - 1];
                 nfds--;
                 i--;
