@@ -35,6 +35,47 @@
 #define CONNECTION_TIMEOUT 50
 #define MAX_CONNECTIONS 100
 
+typedef struct {
+    char *request_buffer;
+    size_t request_header_size;
+    size_t body_size;
+    size_t content_size;
+    bool header_received;
+}http_context;
+
+void reset_context(http_context *context) {
+    if (context == NULL) {
+        return;
+    }
+
+    // Free the dynamically allocated request buffer
+    if (context->request_buffer) {
+        free(context->request_buffer);
+        context->request_buffer = NULL;
+    }
+
+    // Reset all fields to their initial state
+    context->request_header_size = 0;
+    context->body_size = 0;
+    context->content_size = 0;
+    context->header_received = false;
+}
+
+
+void make_socket_non_blocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1) {
+        perror("fcntl F_GETFL");
+        exit(EXIT_FAILURE);
+    }
+
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+        perror("fcntl F_SETFL");
+        exit(EXIT_FAILURE);
+    }
+}
+
+
 const char *get_mime_type(const char *path) {
     fprintf(stderr, "Get mime type\n");
     const char *ext = strrchr(path, '.'); // Get file extension
@@ -57,6 +98,20 @@ const char *get_mime_type(const char *path) {
     return OCTET_MIME; // Default fallback
 }
 
+char *get_header_value(const Request *request, const char *header_name) {
+    if (!request || !header_name) {
+        return NULL;
+    }
+
+    for (int i = 0; i < request->header_count; ++i) {
+        if (strcasecmp(request->headers[i].header_name, header_name) == 0) {
+            return request->headers[i].header_value;
+        }
+    }
+
+    return NULL; // Header not found
+}
+
 void send_response(int client_fd, const char *status, const char *content_type,
                    const char *body, const char *last_modified) {
 
@@ -73,7 +128,7 @@ void send_response(int client_fd, const char *status, const char *content_type,
     free(response);
 }
 
-void handle_get_header(Request *request, int client_fd, const char *www_folder) {
+void handle_get_head(Request *request, int client_fd, const char *www_folder) {
     char full_path[BUF_SIZE];
     memset(full_path, 0, BUF_SIZE);
     if (strcmp(request->http_uri, "/") == 0) {
@@ -106,8 +161,7 @@ void handle_get_header(Request *request, int client_fd, const char *www_folder) 
 
     char last_modified[64];
     struct tm *gmt = gmtime(&file_stat.st_mtime);
-    strftime(last_modified, sizeof(last_modified), "%a, %d %b %Y %H:%M:%S GMT",
-             gmt);
+    strftime(last_modified, sizeof(last_modified), "%a, %d %b %Y %H:%M:%S GMT",gmt);
 
     int file_fd = open(full_path, O_RDONLY);
     if (file_fd == -1) {
@@ -126,35 +180,38 @@ void handle_get_header(Request *request, int client_fd, const char *www_folder) 
         return;
     }
 
-    // Send headers
-    char *headers;
-    size_t headers_len;
-    serialize_http_response(&headers, &headers_len, OK, (char *) mime_type,
-                            content_length, last_modified, 0, NULL);
-    if (write(client_fd, headers, headers_len) != headers_len) {
-        fprintf(stderr, "Error writing headers to client\n");
-        free(headers);
+    char *file_content = malloc(file_size);
+    if (!file_content) {
+        send_response(client_fd, BAD_REQUEST, "text/plain", "Memory allocation failed.", NULL);
         close(file_fd);
         return;
     }
-    free(headers);
-
-    // Send file content in chunks
-    char file_buffer[BUF_SIZE];
-    memset(file_buffer, 0, BUF_SIZE);
-    ssize_t file_bytes_read;
-    while ((file_bytes_read = read(file_fd, file_buffer, sizeof(file_buffer))) >
-           0) {
-        if (write(client_fd, file_buffer, file_bytes_read) != file_bytes_read) {
-            fprintf(stderr, "Error writing file content to client\n");
-            break;
-        }
-    }
-
-    if (file_bytes_read < 0) {
-        fprintf(stderr, "Error reading file\n");
+    ssize_t bytes_read = read(file_fd, file_content, file_size);
+    if (bytes_read != (ssize_t)file_size) {
+        send_response(client_fd, BAD_REQUEST, "text/plain", "File read error.", NULL);
+        free(file_content);
+        close(file_fd);
+        return;
     }
     close(file_fd);
+
+    // Send headers
+    char *resource;
+    size_t resource_len;
+    serialize_http_response(&resource, &resource_len, OK, (char *) mime_type,
+                            content_length, last_modified, file_size, file_content);
+
+    if (write(client_fd, resource, resource_len) != resource_len) {
+        fprintf(stderr, "Error writing headers to client\n");
+        free(resource);
+        free(file_content);
+        close(file_fd);
+        return;
+    }
+
+    free(resource);
+    free(file_content);
+
 }
 
 void handle_post(Request *request, int client_fd, const char *www_folder) {
@@ -181,60 +238,152 @@ void handle_post(Request *request, int client_fd, const char *www_folder) {
     free(response);
 }
 
-void handle_client(int client_fd, const char *www_folder) {
-    char buffer[BUF_SIZE];
-    ssize_t bytes_read;
+bool handle_request(Request *request, int client_fd, const char *www_folder,http_context* context){
 
+    if(context->content_size>0){
+        request->body = malloc(context->content_size);
+        memcpy(request->body,context->request_buffer+context->request_header_size,context->content_size);
+    }
+
+    if (strcmp(request->http_version, HTTP_VER) != 0){
+        send_response(client_fd, BAD_REQUEST, "text/plain", "Wrong HTTP version", NULL);
+        if(request->body!=NULL) {
+            free(request->body);
+        }
+        reset_context(context);
+
+        return true;
+    }
+
+    if(strcmp(request->http_method,GET)==0 || strcmp(request->http_method, HEAD) == 0){
+        handle_get_head(request,client_fd,www_folder);
+    }else if(strcmp(request->http_method, POST) == 0){
+        handle_post(request,client_fd,www_folder);
+    }else{
+        send_response(client_fd, BAD_REQUEST, "text/plain", "Method wrong problem", NULL);
+        if(request->body!=NULL) {
+            free(request->body);
+        }
+        reset_context(context);
+        return true;
+    }
+    char *close_state = get_header_value(request,CONNECTION_STR);
+    bool close_result = false;
+    if(strcasecmp(close_state,CLOSE)==0){
+        close_result = true;
+    }else{
+        close_result = false;
+    }
+
+    if(request->body!=NULL) {
+        free(request->body);
+    }
+    reset_context(context);
+
+    return close_result;
+}
+
+bool handle_client(int client_fd, const char *www_folder,http_context* context) {
+    char buffer[BUF_SIZE];
     memset(buffer, 0, BUF_SIZE);
 
-    while ((bytes_read = read(client_fd, buffer, BUF_SIZE)) > 0) {
-        Request request;
-        memset(&request, 0, sizeof(Request));
+    ssize_t  bytes_read = read(client_fd, buffer, BUF_SIZE);
 
-        test_error_code_t parse_result = parse_http_request(buffer, bytes_read, &request);
-        if (parse_result != TEST_ERROR_NONE) {
-            send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request", NULL);
-            break;
-        }
-        bool close_connection = false;
-        for (int i = 0; i < request.header_count; i++) {
-            fprintf(stderr, "Header: %s: %s \n", request.headers[i].header_name,
-                    request.headers[i].header_value);
-            if (strcasecmp(request.headers[i].header_name, "Connection") == 0 &&
-                strcasecmp(request.headers[i].header_value, "close") == 0) {
-                close_connection = true;
-                break;
-            }
-        }
-
-        if(strcmp(request.http_version,HTTP_VER)!=0) {
-            send_response(client_fd, BAD_REQUEST, "text/plain",
-                          "Wrong HTTP version", NULL);
-            if (close_connection) {
-                fprintf(stderr, "Closing connection based on the Connection close\n");
-                //close(client_fd);
-                break;
-
-            }
-        }
-
-        if (strcasecmp(request.http_method, GET) == 0 || strcasecmp(request.http_method, "HEAD") == 0) {
-            handle_get_header(&request, client_fd, www_folder);
-        } else if (strcasecmp(request.http_method, POST) == 0) {
-            handle_post(&request, client_fd, www_folder);
+    if (bytes_read <= 0) {
+        if (bytes_read == 0) {
+            fprintf(stderr, "Client disconnected.\n");
         } else {
-            send_response(client_fd, BAD_REQUEST, "text/plain", "Unsupported method", NULL);
+            fprintf(stderr,"read failed");
         }
-        if (close_connection) {
-            fprintf(stderr, "Closing connection based on the Connection close\n");
-            //close(client_fd);
-            break;
+        return true; // Indicate that the connection should be closed
+    }
+    fprintf(stderr,"Correct here2\n");
+    fprintf(stderr," header received is %d\n",context->header_received);
 
+    if(!context->header_received){
+        char *new_buffer = realloc(context->request_buffer, context->request_header_size + context->body_size + bytes_read);
+        if (!new_buffer) {
+            fprintf(stderr, "Failed to allocate memory for request buffer\n");
+            return true; // Indicate that the connection should be closed
         }
+        fprintf(stderr,"Correct here3\n");
+        context->request_buffer = new_buffer;
+
+        memcpy(context->request_buffer + context->request_header_size + context->body_size, buffer, bytes_read);
+        Request request;
+        memset(&request, 0, sizeof(request));
+
+        test_error_code_t parse_result = parse_http_request(context->request_buffer,context->request_header_size + context->body_size + bytes_read,&request);
+
+
+        if(parse_result == TEST_ERROR_NONE){
+
+            size_t current_buffer_size = context->request_header_size + context->body_size + bytes_read;
+            context->request_header_size = request.status_header_size;
+            context->body_size = current_buffer_size - context->request_header_size;
+
+            char *content_length_str = get_header_value(&request, CONTENT_LENGTH_STR);
+            size_t content_length = content_length_str ? strtoul(content_length_str, NULL, 10) : 0;
+            context->content_size = content_length;
+
+            char * second_buffer = realloc(context->request_buffer,context->request_header_size + context->content_size);
+            if (!second_buffer) {
+                fprintf(stderr, "Failed to allocate memory for request buffer\n");
+                return true; // Indicate that the connection should be closed
+            }
+            context->request_buffer = second_buffer;
+
+            if(context->content_size <= context->body_size){
+                fprintf(stderr,"content size is %ld\n",context->content_size);
+                fprintf(stderr,"body size is %ld\n",context->body_size);
+                bool is_close = handle_request(&request,client_fd,www_folder,context);
+                return is_close;
+
+            }else{
+
+                context->header_received = true;
+                return false;
+            }
+
+        } else if (parse_result == TEST_ERROR_PARSE_PARTIAL){
+            fprintf(stderr,"parse_partial\n");
+            context->request_header_size+=bytes_read;
+            return false;
+        }else{
+            fprintf(stderr,"parse error\n");
+            return true;
+        }
+
+
+
+
+    }else{
+
+        if (context->body_size + bytes_read > context->content_size) {
+            fprintf(stderr, "Received more data than expected content size,Big error\n");
+            return true; // Close connection due to error
+        }
+
+        memcpy(context->request_buffer + context->request_header_size + context->body_size, buffer, bytes_read);
+        context->body_size += bytes_read;
+
+        if (context->body_size >= context->content_size) {
+            Request request;
+            memset(&request, 0, sizeof(request));
+            test_error_code_t parse_result = parse_http_request(context->request_buffer,context->request_header_size + context->body_size,&request);
+            if(parse_result == TEST_ERROR_NONE){
+                return handle_request(&request, client_fd, www_folder, context);
+            }else{
+                fprintf(stderr,"Big error in received case\n");
+                return true;
+
+            }
+        }
+
+        return false;
 
     }
 
-    close(client_fd);
 }
 
 
@@ -260,6 +409,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Socket creation failed\n");
         return EXIT_FAILURE;
     }
+    make_socket_non_blocking(server_fd);
 
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
@@ -290,6 +440,9 @@ int main(int argc, char *argv[]) {
     fds[0].revents = 0;
     int nfds = 1;
 
+    http_context  request_storage[MAX_CONNECTIONS+1];
+
+
 
     while (true) {
         int poll_count = poll(fds, nfds, CONNECTION_TIMEOUT);
@@ -305,9 +458,15 @@ int main(int argc, char *argv[]) {
                     // Accept new client connection
                     int client_fd = accept(server_fd, NULL, NULL);
                     if (client_fd == -1) {
-                        fprintf(stderr, "Accept failed\n");
-                        continue;
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) {// No pending connections, continue polling
+                            continue;
+                        }else{
+                            fprintf(stderr, "Accept failed\n");
+                            continue;
+                        }
                     }
+
+                    make_socket_non_blocking(client_fd);
 
                     if (nfds - 1 >= MAX_CONNECTIONS) {
                         send_response(client_fd, SERVICE_UNAVAILABLE, HTML_MIME,
@@ -319,18 +478,31 @@ int main(int argc, char *argv[]) {
 
                     fds[nfds].fd = client_fd;
                     fds[nfds].events = POLLIN | POLLHUP | POLLERR;
+                    request_storage[nfds].request_buffer =NULL;
+                    request_storage[nfds].request_header_size = 0;
+                    request_storage[nfds].body_size = 0;
+                    request_storage[nfds].content_size=0;
+                    request_storage[nfds].header_received = false;
+                    fprintf(stderr,"initial client index is %d\n",i);
                     nfds++;
+
+
                 } else {
                     // Handle client request
-                    handle_client(fds[i].fd, www_folder);
-                    fds[i] = fds[nfds - 1];
-                    nfds--;
-                    i--;
+                    fprintf(stderr,"Correct here\n");
+                    fprintf(stderr,"handle client index is %d\n",i);
+                    bool is_close = handle_client(fds[i].fd, www_folder,&request_storage[i]);
+                    if(is_close){
+                        //close(fds[i].fd);
+                        fds[i] = fds[nfds - 1];
+                        nfds--;
+                        i--;
+                    }
 
                     // Remove client from poll array
                 }
             } else if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR ) {
-                fprintf(stderr,"poll handle close\n");
+                reset_context(&request_storage[i]);
                 fds[i] = fds[nfds - 1];
                 nfds--;
                 i--;
