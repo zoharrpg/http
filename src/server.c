@@ -274,6 +274,7 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
     char *close_state = get_header_value(request,CONNECTION_STR);
     bool close_result = false;
     if(strcasecmp(close_state,CLOSE)==0){
+        fprintf(stderr,"compare successful\n");
         close_result = true;
     }else{
         close_result = false;
@@ -329,7 +330,9 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
         if(parse_result == TEST_ERROR_NONE){
 
             size_t current_buffer_size = context->request_header_size + context->body_size + bytes_read;
+
             context->request_header_size = request.status_header_size;
+
             context->body_size = current_buffer_size - context->request_header_size;
 
             char *content_length_str = get_header_value(&request, CONTENT_LENGTH_STR);
