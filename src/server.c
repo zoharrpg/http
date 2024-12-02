@@ -211,7 +211,6 @@ void handle_get_head(Request *request, int client_fd, const char *www_folder) {
 
     free(resource);
     free(file_content);
-
 }
 
 void handle_post(Request *request, int client_fd,http_context* context) {
@@ -467,36 +466,41 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < nfds; i++) {
             if (fds[i].revents & POLLIN) {
                 fds[i].revents = 0; // Clear the event
+
                 if (fds[i].fd == server_fd) {
-                    int client_fd = accept(server_fd, NULL, NULL);
-                    if (client_fd == -1) {
-                        if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                            perror("accept failed");
+                    // Accept all pending connections
+                    while (true) {
+                        int client_fd = accept(server_fd, NULL, NULL);
+                        if (client_fd == -1) {
+                            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                                break; // No more pending connections
+                            } else {
+                                perror("accept failed");
+                                break;
+                            }
                         }
-                        break; // Process only one connection
+
+                        make_socket_non_blocking(client_fd);
+
+                        if (nfds-1 >= MAX_CONNECTIONS) {
+                            send_response(client_fd, SERVICE_UNAVAILABLE, HTML_MIME,
+                                          "<p>Server is overloaded. Try again later.</p>", NULL);
+                            close(client_fd);
+                            continue;
+                        }
+
+                        fds[nfds].fd = client_fd;
+                        fds[nfds].events = POLLIN | POLLHUP | POLLERR;
+                        request_storage[nfds].request_buffer = NULL;
+                        request_storage[nfds].request_header_size = 0;
+                        request_storage[nfds].body_size = 0;
+                        request_storage[nfds].content_size = 0;
+                        request_storage[nfds].header_received = false;
+
+                        fprintf(stderr, "New client initialized at index %d\n", nfds);
+                        nfds++;
                     }
-
-                    make_socket_non_blocking(client_fd);
-
-                    if (nfds-1 >= MAX_CONNECTIONS) {
-                        send_response(client_fd, SERVICE_UNAVAILABLE, HTML_MIME,
-                                      "<p>Server is overloaded. Try again later.</p>", NULL);
-                        close(client_fd);
-                        break; // Stop accepting further connections
-                    }
-
-                    fds[nfds].fd = client_fd;
-                    fds[nfds].events = POLLIN | POLLHUP | POLLERR;
-                    request_storage[nfds].request_buffer = NULL;
-                    request_storage[nfds].request_header_size = 0;
-                    request_storage[nfds].body_size = 0;
-                    request_storage[nfds].content_size = 0;
-                    request_storage[nfds].header_received = false;
-
-                    fprintf(stderr, "New client initialized at index %d\n", nfds);
-                    nfds++;
-                    break; // Ensure only one accept per poll cycle
-                }else {
+                } else {
                     // Handle client request
                     bool is_close = handle_client(fds[i].fd, www_folder, &request_storage[i],nfds);
                     if (is_close) {
@@ -510,7 +514,6 @@ int main(int argc, char *argv[]) {
                     }
                 }
             } else if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR) {
-                fds[i].revents = 0;
                 fprintf(stderr, "Error or hangup on client at index %d\n", i);
                 reset_context(&request_storage[i]);
                 close(fds[i].fd);
