@@ -68,7 +68,7 @@ void send_response(int client_fd, const char *status, const char *content_type, 
 }
 
 void handle_get_header(Request* request,int client_fd,const char *www_folder){
-    char full_path[4096];
+    char full_path[HTTP_SIZE];
     memset(full_path, 0, HTTP_SIZE);
     if (strcmp(request->http_uri, "/") == 0) {
         // If the request is to the root, append /index.html
@@ -130,7 +130,7 @@ void handle_get_header(Request* request,int client_fd,const char *www_folder){
 
     // Send file content in chunks
     char file_buffer[BUF_SIZE];
-    memset(file_buffer, 0, HTTP_SIZE);
+    memset(file_buffer, 0, BUF_SIZE);
     ssize_t file_bytes_read;
     while ((file_bytes_read = read(file_fd, file_buffer, sizeof(file_buffer))) > 0) {
         if (write(client_fd, file_buffer, file_bytes_read) != file_bytes_read) {
@@ -178,7 +178,7 @@ void handle_client(int client_fd, const char *www_folder) {
     while (1) {
         memset(buffer, 0, BUF_SIZE);
 
-        bytes_read = read(client_fd, buffer, BUF_SIZE - 1);
+        bytes_read = read(client_fd, buffer, BUF_SIZE-1);
         if (bytes_read <= 0) {
             if (bytes_read == 0) {
                 // Client closed the connection
@@ -189,6 +189,7 @@ void handle_client(int client_fd, const char *www_folder) {
             close(client_fd);
             return;
         }
+        buffer[bytes_read] = '\0';
 
         Request request;
         memset(&request, 0, sizeof(Request));
@@ -239,6 +240,7 @@ void handle_client(int client_fd, const char *www_folder) {
         }
 
         if (close_connection) {
+            fprintf(stderr, "Closing connection based on the Connection close\n");
             close(client_fd);
             return;
         }
