@@ -214,12 +214,12 @@ void handle_get_head(Request *request, int client_fd, const char *www_folder) {
 
 }
 
-void handle_post(Request *request, int client_fd, const char *www_folder) {
+void handle_post(Request *request, int client_fd,http_context* context) {
     // implement the handle post just echo the request body, also implement the
     // large post request in the client Extract the Content-Length header to
     // determine the body size Extract the body from the request
     char *body = request->body;
-    size_t body_len = strlen(body);
+    size_t body_len = context->body_size;
 
     // Prepare the response headers
     char content_length[32];
@@ -258,7 +258,7 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
     if(strcmp(request->http_method,GET)==0 || strcmp(request->http_method, HEAD) == 0){
         handle_get_head(request,client_fd,www_folder);
     }else if(strcmp(request->http_method, POST) == 0){
-        handle_post(request,client_fd,www_folder);
+        handle_post(request,client_fd,context);
     }else{
         send_response(client_fd, BAD_REQUEST, "text/plain", "Method wrong problem", NULL);
         if(request->body!=NULL) {
