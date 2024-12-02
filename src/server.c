@@ -149,7 +149,29 @@ void handle_get_header(Request* request,int client_fd,const char *www_folder){
 }
 
 void handle_post(Request* request,int client_fd,const char *www_folder){
-    send_response(client_fd, BAD_REQUEST, "text/plain", "Request incomplete", NULL);
+    // implement the handle post just echo the request body, also implement the large post request in the client
+    // Extract the Content-Length header to determine the body size
+    // Extract the body from the request
+    char *body = request->body;
+    size_t body_len = strlen(body);
+
+    // Prepare the response headers
+    char content_length[32];
+    snprintf(content_length, sizeof(content_length), "%ld", body_len);
+
+    // Send the response
+    char *response;
+    size_t response_len;
+    serialize_http_response(&response, &response_len, OK, "text/plain", content_length, NULL, body_len, body);
+
+    if (write(client_fd, response, response_len) != response_len) {
+        fprintf(stderr, "Error writing response to client\n");
+    }
+
+    free(response);
+    close(client_fd);
+
+
 }
 
 
