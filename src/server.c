@@ -228,7 +228,7 @@ void handle_post(Request *request, int client_fd,http_context* context) {
     // Send the response
     char *response;
     size_t response_len;
-    serialize_http_response(&response, &response_len, OK, "text/plain",
+    serialize_http_response(&response, &response_len, OK, get_header_value(request,"Content-Type"),
                             content_length, NULL, body_len, body);
 
     if (write(client_fd, response, response_len) != response_len) {
@@ -297,8 +297,6 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context) 
         }
         return true; // Indicate that the connection should be closed
     }
-    fprintf(stderr,"Correct here2\n");
-    fprintf(stderr," header received is %d\n",context->header_received);
 
     if(!context->header_received){
         char *new_buffer = realloc(context->request_buffer, context->request_header_size + context->body_size + bytes_read);
@@ -306,7 +304,6 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context) 
             fprintf(stderr, "Failed to allocate memory for request buffer\n");
             return true; // Indicate that the connection should be closed
         }
-        fprintf(stderr,"Correct here3\n");
         context->request_buffer = new_buffer;
 
         memcpy(context->request_buffer + context->request_header_size + context->body_size, buffer, bytes_read);
@@ -368,6 +365,8 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context) 
         context->body_size += bytes_read;
 
         if (context->body_size >= context->content_size) {
+            fprintf(stderr,"content size is %ld\n",context->content_size);
+            fprintf(stderr,"body size is %ld\n",context->body_size);
             Request request;
             memset(&request, 0, sizeof(request));
             test_error_code_t parse_result = parse_http_request(context->request_buffer,context->request_header_size + context->body_size,&request);
@@ -489,11 +488,11 @@ int main(int argc, char *argv[]) {
 
                 } else {
                     // Handle client request
-                    fprintf(stderr,"Correct here\n");
-                    fprintf(stderr,"handle client index is %d\n",i);
+//                    fprintf(stderr,"Correct here\n");
+//                    fprintf(stderr,"handle client index is %d\n",i);
                     bool is_close = handle_client(fds[i].fd, www_folder,&request_storage[i]);
                     if(is_close){
-                        //close(fds[i].fd);
+                        close(fds[i].fd);
                         fds[i] = fds[nfds - 1];
                         nfds--;
                         i--;
