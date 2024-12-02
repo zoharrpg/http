@@ -187,25 +187,15 @@ void handle_client(int client_fd, const char *www_folder) {
 
     memset(buffer, 0, BUF_SIZE);
 
-    bytes_read = read(client_fd, buffer, BUF_SIZE - 1);
-    if (bytes_read <= 0) {
-        if (bytes_read == 0) {
-            // Client closed the connection
-            fprintf(stderr, "Client closed the connection\n");
-        } else {
-            fprintf(stderr, "bytes_read failed\n");
+    while ((bytes_read = read(client_fd, buffer, BUF_SIZE)) > 0) {
+        Request request;
+        memset(&request, 0, sizeof(Request));
+
+        test_error_code_t parse_result = parse_http_request(buffer, bytes_read, &request);
+        if (parse_result != TEST_ERROR_NONE) {
+            send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request", NULL);
+            break;
         }
-        close(client_fd);
-        return;
-    }
-    buffer[bytes_read] = '\0';
-
-    Request request;
-    memset(&request, 0, sizeof(Request));
-
-    test_error_code_t parse_result = parse_http_request(buffer, bytes_read, &request);
-
-    if (parse_result == TEST_ERROR_NONE) {
         bool close_connection = false;
         for (int i = 0; i < request.header_count; i++) {
             fprintf(stderr, "Header: %s: %s \n", request.headers[i].header_name,
@@ -216,46 +206,37 @@ void handle_client(int client_fd, const char *www_folder) {
                 break;
             }
         }
+
         if(strcmp(request.http_version,HTTP_VER)!=0) {
             send_response(client_fd, BAD_REQUEST, "text/plain",
                           "Wrong HTTP version", NULL);
             if (close_connection) {
                 fprintf(stderr, "Closing connection based on the Connection close\n");
-                close(client_fd);
-                return;
-            }
+                //close(client_fd);
+                break;
 
+            }
         }
 
-
-            if (strcmp(request.http_method, GET) == 0 ||strcmp(request.http_method, HEAD) == 0) {
-
-                handle_get_header(&request, client_fd, www_folder);
-            } else if (strcmp(request.http_method, POST) == 0) {
-                handle_post(&request, client_fd, www_folder);
-            } else {
-                send_response(client_fd, BAD_REQUEST, "text/plain",
-                              "Method wrong problem", NULL);
-                //close(client_fd);
-            }
-
-
-        // Check if the connection should be closed
-
+        if (strcasecmp(request.http_method, GET) == 0 || strcasecmp(request.http_method, "HEAD") == 0) {
+            handle_get_header(&request, client_fd, www_folder);
+        } else if (strcasecmp(request.http_method, POST) == 0) {
+            handle_post(&request, client_fd, www_folder);
+        } else {
+            send_response(client_fd, BAD_REQUEST, "text/plain", "Unsupported method", NULL);
+        }
         if (close_connection) {
             fprintf(stderr, "Closing connection based on the Connection close\n");
-            close(client_fd);
-            return;
+            //close(client_fd);
+            break;
+
         }
 
-    } else {
-        send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request",
-                      NULL);
-        close(client_fd);
-        return;
     }
 
+    close(client_fd);
 }
+
 
 int main(int argc, char *argv[]) {
     /* Validate and parse args */
@@ -342,6 +323,9 @@ int main(int argc, char *argv[]) {
                 } else {
                     // Handle client request
                     handle_client(fds[i].fd, www_folder);
+                    fds[i] = fds[nfds - 1];
+                    nfds--;
+                    i--;
 
                     // Remove client from poll array
                 }
