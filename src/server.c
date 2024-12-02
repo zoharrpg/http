@@ -176,58 +176,77 @@ void handle_post(Request* request,int client_fd,const char *www_folder){
 
 
 void handle_client(int client_fd, const char *www_folder) {
-
     char buffer[BUF_SIZE];
-    memset(buffer, 0, HTTP_SIZE);
+    ssize_t bytes_read;
 
-    ssize_t bytes_read = read(client_fd, buffer, BUF_SIZE - 1);
-    if (bytes_read <= 0) {
-        close(client_fd);
-        fprintf(stderr, "bytes_read failed\n");
-        return;
-    }
+    while (1) {
+        memset(buffer, 0, HTTP_SIZE);
 
-    Request request;
-    memset(&request, 0, sizeof(Request));
-
-    test_error_code_t parse_result = parse_http_request(buffer, bytes_read, &request);
-
-    switch (parse_result) {
-        case TEST_ERROR_NONE:
-            if (strcmp(request.http_version, HTTP_VER) == 0){
-                break;
+        bytes_read = read(client_fd, buffer, BUF_SIZE - 1);
+        if (bytes_read <= 0) {
+            if (bytes_read == 0) {
+                // Client closed the connection
+                fprintf(stderr, "Client closed the connection\n");
             } else {
-                send_response(client_fd, BAD_REQUEST, "text/plain", "Request incomplete", NULL);
-                return;
+                fprintf(stderr, "bytes_read failed\n");
             }
-        case TEST_ERROR_PARSE_PARTIAL:
-            send_response(client_fd, BAD_REQUEST, "text/plain", "Request incomplete", NULL);
+            close(client_fd);
             return;
-        case TEST_ERROR_PARSE_FAILED:
-            send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request", NULL);
-            return;
+        }
 
-        case TEST_ERROR_HTTP_CONNECT_FAILED:
-            send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request", NULL);
-            return;
-        case TEST_ERROR_HTTP_SEND_FAILED:
-            send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request", NULL);
-            return;
-        default:
-            send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request", NULL);
-            return;
+        Request request;
+        memset(&request, 0, sizeof(Request));
 
+        test_error_code_t parse_result = parse_http_request(buffer, bytes_read, &request);
+
+        switch (parse_result) {
+            case TEST_ERROR_NONE:
+                if (strcmp(request.http_version, HTTP_VER) == 0) {
+                    break;
+                } else {
+                    send_response(client_fd, BAD_REQUEST, "text/plain", "Request incomplete", NULL);
+                    continue;
+                }
+            case TEST_ERROR_PARSE_PARTIAL:
+                send_response(client_fd, BAD_REQUEST, "text/plain", "Request incomplete", NULL);
+                continue;
+            case TEST_ERROR_PARSE_FAILED:
+                send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request", NULL);
+                continue;
+            case TEST_ERROR_HTTP_CONNECT_FAILED:
+                send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request", NULL);
+                continue;
+            case TEST_ERROR_HTTP_SEND_FAILED:
+                send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request", NULL);
+                continue;
+            default:
+                send_response(client_fd, BAD_REQUEST, "text/plain", "Malformed request", NULL);
+                continue;
+        }
+
+        if (strcmp(request.http_method, GET) == 0 || strcmp(request.http_method, HEAD) == 0) {
+            handle_get_header(&request, client_fd, www_folder);
+        } else if (strcmp(request.http_method, POST) == 0) {
+            handle_post(&request, client_fd, www_folder);
+        } else {
+            send_response(client_fd, BAD_REQUEST, "text/plain", "Method wrong problem", NULL);
+        }
+
+        // Check if the connection should be closed
+        bool close_connection = false;
+        for (int i = 0; i < request.header_count; i++) {
+            if (strcasecmp(request.headers[i].header_name, "Connection") == 0 &&
+                strcasecmp(request.headers[i].header_value, "close") == 0) {
+                close_connection = true;
+                break;
+            }
+        }
+
+        if (close_connection) {
+            close(client_fd);
+            return;
+        }
     }
-
-    if(strcmp(request.http_method,GET)==0 || strcmp(request.http_method, HEAD) == 0){
-        handle_get_header(&request,client_fd,www_folder);
-    }else if(strcmp(request.http_method, POST) == 0){
-        handle_post(&request,client_fd,www_folder);
-    }else{
-        send_response(client_fd, BAD_REQUEST, "text/plain", "Method wrong problem", NULL);
-    }
-
-
 }
 
 
