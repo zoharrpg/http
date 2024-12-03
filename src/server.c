@@ -326,31 +326,40 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
     char buffer[BUF_SIZE];
     memset(buffer, 0, BUF_SIZE);
+    ssize_t  total_read = 0;
+    while(total_read < BUF_SIZE){
 
-    ssize_t  bytes_read = read(client_fd, buffer, BUF_SIZE);
+        ssize_t  bytes_read = read(client_fd, buffer, BUF_SIZE);
 
-    if (bytes_read <= 0) {
-        if (bytes_read == 0) {
-            fprintf(stderr,"The is read 0\n");
-            return true;
-        } else {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // No more data available for now (non-blocking mode)
-                fprintf(stderr,"No data available, try again later.\n");
-                return false;
-            } else {
-                fprintf(stderr,"Error reading from file descriptor");
-
+        if (bytes_read <= 0) {
+            if (bytes_read == 0) {
+                fprintf(stderr,"The is read 0\n");
                 return true;
-            }
-        }
-        // Indicate that the connection should be closed
+            } else {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // No more data available for now (non-blocking mode)
+                    fprintf(stderr,"No data available, try again later.\n");
+                    break;
+                } else {
+                    fprintf(stderr,"Error reading from file descriptor");
 
+                    return true;
+                }
+            }
+            // Indicate that the connection should be closed
+
+        }
+        total_read+=bytes_read;
+
+    }
+
+    if(total_read<=0){
+        return false;
     }
 
     fprintf(stderr,"The nfds is %d\n",nfds);
 
-    char *new_buffer = realloc(context->request_buffer, context->buffer_size + bytes_read);
+    char *new_buffer = realloc(context->request_buffer, context->buffer_size + total_read);
     if (!new_buffer){
         fprintf(stderr, "Failed to allocate memory for request buffer\n");
         return true; // Indicate that the connection should be closed
@@ -358,9 +367,9 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
     context->request_buffer = new_buffer;
 
-    memcpy(context->request_buffer + context->buffer_size, buffer, bytes_read);
+    memcpy(context->request_buffer + context->buffer_size, buffer, total_read);
 
-    context->buffer_size+=bytes_read;
+    context->buffer_size+=total_read;
 
     while(context->buffer_size > 0){
 
