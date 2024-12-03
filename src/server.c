@@ -233,9 +233,12 @@ bool handle_post(Request *request, int client_fd,http_context* context,size_t co
 
 
     fprintf(stderr,"the post is size is %ld\n",request->status_header_size + content_length);
+    fprintf(stderr,"The header is%ld\n",request->status_header_size);
+    fprintf(stderr,"the content length is %ld\n",content_length);
 
     
     bool write_result = write_all(client_fd, context->request_buffer, request->status_header_size + content_length);
+    fprintf(stderr,"the write result is%d\n",write_result);
     
     return write_result;
 
@@ -338,7 +341,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
         if (bytes_read <= 0) {
             if (bytes_read == 0) {
                 fprintf(stderr,"The is read 0\n");
-                return true;
+                return false;
             } else {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     // No more data available for now (non-blocking mode)
