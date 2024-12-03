@@ -332,7 +332,6 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                         return true;
                     }
 
-
                     context->buffer_size-=request.status_header_size + content_length;
 
                     if(context->buffer_size == 0){
@@ -365,7 +364,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
 
             }else{
-                return true;
+                return false;
             }
 
 
