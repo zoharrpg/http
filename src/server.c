@@ -240,10 +240,18 @@ void handle_post(Request *request, int client_fd,http_context* context,size_t co
 
 bool handle_request(Request *request, int client_fd, const char *www_folder,http_context* context,size_t content_length){
 
+    char *close_state = get_header_value(request,CONNECTION_STR);
+    bool close_result = false;
+    if(close_state && strcasecmp(close_state,CLOSE)==0){
+        fprintf(stderr,"compare successful\n");
+        close_result = true;
+    }else{
+        close_result = false;
+    }
     if (strcmp(request->http_version, HTTP_VER) != 0){
         send_response(client_fd, BAD_REQUEST, "text/plain", "Wrong HTTP version", NULL);
+        return close_result;
 
-        return false;
     }
 
     if(strcmp(request->http_method,GET)==0 || strcmp(request->http_method, HEAD) == 0){
@@ -255,16 +263,6 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
         handle_post(request,client_fd,context,content_length);
     }else{
         send_response(client_fd, BAD_REQUEST, "text/plain", "Method wrong problem", NULL);
-        return false;
-    }
-    char *close_state = get_header_value(request,CONNECTION_STR);
-
-    bool close_result = false;
-    if(close_state && strcasecmp(close_state,CLOSE)==0){
-        fprintf(stderr,"compare successful\n");
-        close_result = true;
-    }else{
-        close_result = false;
     }
 
     return close_result;
