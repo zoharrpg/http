@@ -228,6 +228,7 @@ void handle_post(Request *request, int client_fd,http_context* context,size_t co
 //                            content_length, NULL, body_len, body);
 //    fprintf(stderr,"post header size is %ld\n",context->request_header_size);
     size_t  write_byte = write(client_fd, context->request_buffer,request->status_header_size + content_length);
+    fprintf(stderr,"the post is size is %ld\n",request->status_header_size + content_length);
 
     if ( write_byte != request->status_header_size + content_length) {
         fprintf(stderr, "Error writing response to client\n");
@@ -357,6 +358,9 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
             } else if (parse_result == TEST_ERROR_PARSE_PARTIAL){
                 return false;
+            }else if(parse_result == TEST_ERROR_PARSE_FAILED){
+                return false;
+
             }else{
                 fprintf(stderr,"parse error\n");
                 return true;
