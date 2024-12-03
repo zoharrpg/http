@@ -274,31 +274,42 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
 bool handle_client(int client_fd, const char *www_folder,http_context* context,int nfds) {
     char buffer[BUF_SIZE];
     memset(buffer, 0, BUF_SIZE);
+    size_t total_read = 0;
+    while (total_read < BUF_SIZE){
+        ssize_t  bytes_read = read(client_fd, buffer+total_read, BUF_SIZE-total_read);
 
-    ssize_t  bytes_read = read(client_fd, buffer, BUF_SIZE);
-
-    if (bytes_read <= 0) {
-        if (bytes_read == 0) {
-            fprintf(stderr,"The is read 0\n");
-            return true;
-        } else {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // No more data available for now (non-blocking mode)
-                fprintf(stderr,"No data available, try again later.\n");
-                return false;
+        if (bytes_read <= 0) {
+            if (bytes_read == 0) {
+                fprintf(stderr,"The is read 0\n");
+                return true;
             } else {
-                fprintf(stderr,"Error reading from file descriptor");
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // No more data available for now (non-blocking mode)
+                    fprintf(stderr,"No data available, try again later.\n");
+                    break;
+                } else {
+                    fprintf(stderr,"Error reading from file descriptor");
 
-                return false;
+                    break;
+                }
             }
+            // Indicate that the connection should be closed
+
         }
-         // Indicate that the connection should be closed
+        total_read+=bytes_read;
 
     }
 
+    if(total_read == 0){
+        return false;
+    }
+
+
+
+
     fprintf(stderr,"The nfds is %d\n",nfds);
 
-    char *new_buffer = realloc(context->request_buffer, context->buffer_size + bytes_read);
+    char *new_buffer = realloc(context->request_buffer, context->buffer_size + total_read);
     if (!new_buffer){
         fprintf(stderr, "Failed to allocate memory for request buffer\n");
         return true; // Indicate that the connection should be closed
@@ -306,11 +317,12 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
     context->request_buffer = new_buffer;
 
-    memcpy(context->request_buffer + context->buffer_size, buffer, bytes_read);
+    memcpy(context->request_buffer + context->buffer_size, buffer, total_read);
 
-    context->buffer_size+=bytes_read;
+    context->buffer_size+=total_read;
+    fprintf(stderr,"The bytes read is %ld\n",total_read);
 
-    while(context->buffer_size > 0){
+    while(context->buffer_size  > 0){
 
             Request request;
             memset(&request, 0, sizeof(request));
@@ -351,7 +363,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                     }
 
                     fprintf(stderr,"Correct here22\n");
-                    fprintf(stderr,"the close is %d\n",is_close);
+                    fprintf(stderr,"in the loop :the close is %d\n",is_close);
 
 
 
@@ -373,8 +385,9 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
 
     }
+    fprintf(stderr,"outer sider loop\n");
 
-    return true;
+    return false;
 
 }
 
@@ -484,7 +497,7 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr,"the index is %d\n",i);
                     bool is_close = handle_client(fds[i].fd, www_folder, &request_storage[i],nfds);
 
-                    fprintf(stderr,"the is close is %d\n",is_close);
+                    fprintf(stderr,"poll main loop %d\n",is_close);
                     if (is_close) {
                         fprintf(stderr, "Closing client at index %d\n", i);
                         close(fds[i].fd);
