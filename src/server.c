@@ -333,7 +333,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
     ssize_t  total_read = 0;
     while(total_read < BUF_SIZE){
 
-        ssize_t  bytes_read = read(client_fd, buffer, BUF_SIZE);
+        ssize_t  bytes_read = read(client_fd, buffer + total_read, BUF_SIZE - total_read);
 
         if (bytes_read <= 0) {
             if (bytes_read == 0) {
