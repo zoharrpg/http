@@ -245,7 +245,7 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
 
     bool close_result = false;
 
-    if(close_state && strcasecmp(close_state,CLOSE)==0){
+    if(close_state&&strcasecmp(close_state,CLOSE)==0){
         fprintf(stderr,"compare successful\n");
         close_result = true;
     }else{
@@ -255,17 +255,46 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
 
     if (strcmp(request->http_version, HTTP_VER) != 0){
         is_write = send_response(client_fd, BAD_REQUEST, "text/plain", "Wrong HTTP version", NULL);
+        if(close_result){
+            while(!is_write){
+                is_write = send_response(client_fd, BAD_REQUEST, "text/plain", "Wrong HTTP version", NULL);
+
+            }
+        }
+
 
     }else{
         if(strcmp(request->http_method,GET)==0 || strcmp(request->http_method, HEAD) == 0){
 
+
+
             is_write=handle_get_head(request,client_fd,www_folder);
+
+            if(close_result){
+                while(!is_write){
+                    is_write = handle_get_head(request,client_fd,www_folder);
+
+                }
+            }
 
         }else if(strcmp(request->http_method, POST) == 0){
 
             is_write=handle_post(request,client_fd,context,content_length);
+            if(close_result){
+                while(!is_write){
+                    is_write = handle_post(request,client_fd,context,content_length);
+
+                }
+            }
         }else{
             is_write=send_response(client_fd, BAD_REQUEST, "text/plain", "Method wrong problem", NULL);
+            //is_write = send_response(client_fd, BAD_REQUEST, "text/plain", "Wrong HTTP version", NULL);
+            if(close_result){
+                while(!is_write){
+                    is_write = send_response(client_fd, BAD_REQUEST, "text/plain", "Method wrong problem", NULL);
+
+                }
+            }
         }
 
     }
@@ -294,6 +323,7 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
 }
 
 bool handle_client(int client_fd, const char *www_folder,http_context* context,int nfds) {
+
     char buffer[BUF_SIZE];
     memset(buffer, 0, BUF_SIZE);
 
@@ -311,7 +341,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
             } else {
                 fprintf(stderr,"Error reading from file descriptor");
 
-                return false;
+                return true;
             }
         }
         // Indicate that the connection should be closed
@@ -352,6 +382,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                 bool is_close = handle_request(&request,client_fd,www_folder,context,content_length);
 
                 if(is_close){
+
 
                     return true;
                 }
