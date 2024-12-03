@@ -119,7 +119,15 @@ void send_response(int client_fd, const char *status, const char *content_type,
             &response, &response_len, status, (char *) content_type, content_length,
             (char *) last_modified, body ? strlen(body) : 0, (char *) body);
 
-    write(client_fd, response, response_len);
+    size_t total_write = 0;
+    while(response_len > total_write){
+        size_t  writen_byte = write(client_fd, response + total_write, response_len-total_write);
+        if(writen_byte == -1){
+            fprintf(stderr,"Write error\n");
+            return;
+        }
+        total_write+=writen_byte;
+    }
     free(response);
 }
 
@@ -196,12 +204,14 @@ void handle_get_head(Request *request, int client_fd, const char *www_folder) {
     serialize_http_response(&resource, &resource_len, OK, (char *) mime_type,
                             content_length, last_modified, file_size, file_content);
 
-    if (write(client_fd, resource, resource_len) != resource_len) {
-        fprintf(stderr, "Error writing headers to client\n");
-        free(resource);
-        free(file_content);
-        close(file_fd);
-        return;
+    size_t total_write = 0;
+    while(resource_len > total_write){
+        size_t  writen_byte = write(client_fd, resource + total_write, resource_len-total_write);
+        if(writen_byte == -1){
+            fprintf(stderr,"Write error\n");
+            return;
+        }
+        total_write+=writen_byte;
     }
 
     free(resource);
@@ -211,17 +221,24 @@ void handle_get_head(Request *request, int client_fd, const char *www_folder) {
 void handle_post(Request *request, int client_fd,http_context* context,size_t content_length) {
 
 
-
-    size_t  write_byte = write(client_fd, context->request_buffer,request->status_header_size + content_length);
     fprintf(stderr,"the post is size is %ld\n",request->status_header_size + content_length);
 
-    if ( write_byte != request->status_header_size + content_length) {
-        fprintf(stderr, "Error writing response to client\n");
+    size_t  total_writen = 0;
+
+    while(request->status_header_size + content_length>total_writen){
+        size_t  writen_byte = write(client_fd, context->request_buffer+total_writen,request->status_header_size + content_length - total_writen);
+        if(writen_byte == -1){
+            fprintf(stderr, "Error writing response to client\n");
+            return;
+        }
+        total_writen+=writen_byte;
     }
+
 
 }
 
 bool handle_request(Request *request, int client_fd, const char *www_folder,http_context* context,size_t content_length){
+
 
     char *close_state = get_header_value(request,CONNECTION_STR);
     bool close_result = false;
@@ -231,6 +248,7 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
     }else{
         close_result = false;
     }
+
     if (strcmp(request->http_version, HTTP_VER) != 0){
         send_response(client_fd, BAD_REQUEST, "text/plain", "Wrong HTTP version", NULL);
         return close_result;
@@ -312,6 +330,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                     bool is_close = handle_request(&request,client_fd,www_folder,context,content_length);
 
                     if(is_close){
+
                         return true;
                     }
 
