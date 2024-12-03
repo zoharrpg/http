@@ -417,7 +417,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
         }
     }
 
-    return true;
+    return false;
 
 }
 
