@@ -226,7 +226,7 @@ bool handle_post(Request *request, int client_fd,http_context* context,size_t co
 
     size_t  total_writen = 0;
 
-    while(request->status_header_size + content_length>=total_writen){
+    while(request->status_header_size + content_length>total_writen){
         fprintf(stderr,"infinit write\n");
         size_t  writen_byte = write(client_fd, context->request_buffer+total_writen,request->status_header_size + content_length - total_writen);
         if(writen_byte == -1 || writen_byte == 0){
@@ -533,6 +533,7 @@ int main(int argc, char *argv[]) {
     }
 
     close(server_fd);
+    fprintf(stderr,"exit the loop\n");
 
     return EXIT_SUCCESS;
 }
