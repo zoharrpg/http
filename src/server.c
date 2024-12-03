@@ -107,7 +107,7 @@ char *get_header_value(const Request *request, const char *header_name) {
     return NULL; // Header not found
 }
 
-bool send_response(int client_fd, const char *status, const char *content_type,
+void send_response(int client_fd, const char *status, const char *content_type,
                    const char *body, const char *last_modified) {
 
     char *response;
@@ -122,17 +122,16 @@ bool send_response(int client_fd, const char *status, const char *content_type,
     size_t total_write = 0;
     while(response_len > total_write){
         size_t  writen_byte = write(client_fd, response + total_write, response_len-total_write);
-        if(writen_byte == -1 || writen_byte==0){
+        if(writen_byte == -1){
             fprintf(stderr,"Write error\n");
-            return false;
+            return;
         }
         total_write+=writen_byte;
     }
     free(response);
-    return true;
 }
 
-bool handle_get_head(Request *request, int client_fd, const char *www_folder) {
+void handle_get_head(Request *request, int client_fd, const char *www_folder) {
     char full_path[BUF_SIZE];
     memset(full_path, 0, BUF_SIZE);
     if (strcmp(request->http_uri, "/") == 0) {
@@ -148,17 +147,17 @@ bool handle_get_head(Request *request, int client_fd, const char *www_folder) {
 
     struct stat file_stat;
     if (stat(full_path, &file_stat) == -1) {
-        return send_response(client_fd, NOT_FOUND, HTML_MIME, "<h1>File not found.</h1>",
+        send_response(client_fd, NOT_FOUND, HTML_MIME, "<h1>File not found.</h1>",
                       NULL);
-
+        return;
     }
 
     if (S_ISDIR(file_stat.st_mode)) {
         snprintf(full_path, sizeof(full_path), "%s%s/index.html", www_folder,request->http_uri);
         if (stat(full_path, &file_stat) == -1) {
-
-            return send_response(client_fd, NOT_FOUND, HTML_MIME, "<h1>File not found.</h1>",
-                                NULL);
+            send_response(client_fd, NOT_FOUND, HTML_MIME, "<h1>File not found.</h1>",
+                          NULL);
+            return;
         }
     }
     fprintf(stderr, "%s\n", full_path);
@@ -169,9 +168,9 @@ bool handle_get_head(Request *request, int client_fd, const char *www_folder) {
 
     int file_fd = open(full_path, O_RDONLY);
     if (file_fd == -1) {
-        return send_response(client_fd, BAD_REQUEST, "text/plain", "Unable to open file.",
+        send_response(client_fd, BAD_REQUEST, "text/plain", "Unable to open file.",
                       NULL);
-
+        return;
     }
 
     size_t file_size = file_stat.st_size;
@@ -180,21 +179,22 @@ bool handle_get_head(Request *request, int client_fd, const char *www_folder) {
     const char *mime_type = get_mime_type(full_path);
 
     if (request->http_method[0] == 'H') {
-
-        return send_response(client_fd, OK, mime_type, NULL, last_modified);;
+        send_response(client_fd, OK, mime_type, NULL, last_modified);
+        return;
     }
 
     char *file_content = malloc(file_size);
     if (!file_content) {
-
+        send_response(client_fd, BAD_REQUEST, "text/plain", "Memory allocation failed.", NULL);
         close(file_fd);
-        return send_response(client_fd, BAD_REQUEST, "text/plain", "Memory allocation failed.", NULL);;
+        return;
     }
     ssize_t bytes_read = read(file_fd, file_content, file_size);
     if (bytes_read != (ssize_t)file_size) {
+        send_response(client_fd, BAD_REQUEST, "text/plain", "File read error.", NULL);
         free(file_content);
         close(file_fd);
-        return send_response(client_fd, BAD_REQUEST, "text/plain", "File read error.", NULL);
+        return;
     }
     close(file_fd);
 
@@ -207,19 +207,18 @@ bool handle_get_head(Request *request, int client_fd, const char *www_folder) {
     size_t total_write = 0;
     while(resource_len > total_write){
         size_t  writen_byte = write(client_fd, resource + total_write, resource_len-total_write);
-        if(writen_byte == -1 || writen_byte==0){
+        if(writen_byte == -1){
             fprintf(stderr,"Write error\n");
-            return false;
+            return;
         }
         total_write+=writen_byte;
     }
 
     free(resource);
     free(file_content);
-    return true;
 }
 
-bool handle_post(Request *request, int client_fd,http_context* context,size_t content_length) {
+void handle_post(Request *request, int client_fd,http_context* context,size_t content_length) {
 
 
     fprintf(stderr,"the post is size is %ld\n",request->status_header_size + content_length);
@@ -227,18 +226,13 @@ bool handle_post(Request *request, int client_fd,http_context* context,size_t co
     size_t  total_writen = 0;
 
     while(request->status_header_size + content_length>total_writen){
-        fprintf(stderr,"infinit write\n");
         size_t  writen_byte = write(client_fd, context->request_buffer+total_writen,request->status_header_size + content_length - total_writen);
-        if(writen_byte == -1 || writen_byte == 0){
+        if(writen_byte == -1){
             fprintf(stderr, "Error writing response to client\n");
-            return false;
+            return;
         }
-        fprintf(stderr,"The writen byte is %ld\n",writen_byte);
-        fprintf(stderr,"The header size is %ld\n",request->status_header_size);
-        fprintf(stderr,"The content length is %ld\n",content_length);
         total_writen+=writen_byte;
     }
-    return true;
 
 
 }
@@ -262,37 +256,33 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
         return close_result;
 
     }
-    bool is_write = true;
 
     if(strcmp(request->http_method,GET)==0 || strcmp(request->http_method, HEAD) == 0){
 
-        is_write = handle_get_head(request,client_fd,www_folder);
+        handle_get_head(request,client_fd,www_folder);
 
     }else if(strcmp(request->http_method, POST) == 0){
 
-         is_write= handle_post(request,client_fd,context,content_length);
+        handle_post(request,client_fd,context,content_length);
     }else{
-        is_write = send_response(client_fd, BAD_REQUEST, "text/plain", "Method wrong problem", NULL);
+        send_response(client_fd, BAD_REQUEST, "text/plain", "Method wrong problem", NULL);
     }
 
-    if(is_write){
-        context->buffer_size-=request->status_header_size + content_length;
-
-        if(context->buffer_size == 0){
-            free(context->request_buffer);
-            context->request_buffer = NULL;
-
-        }else{
-
-            char* new_request_buffer = malloc(context->buffer_size);
-            memcpy(new_request_buffer,context->request_buffer+request->status_header_size + content_length,context->buffer_size);
-            free(context->request_buffer);
-            context->request_buffer = NULL;
-            context->request_buffer = new_request_buffer;
-
-        }
-
-    }
+//    context->buffer_size-=request.status_header_size + content_length;
+//
+//    if(context->buffer_size == 0){
+//        free(context->request_buffer);
+//        context->request_buffer = NULL;
+//
+//    }else{
+//
+//        char* new_request_buffer = malloc(context->buffer_size);
+//        memcpy(new_request_buffer,context->request_buffer+request.status_header_size + content_length,context->buffer_size);
+//        free(context->request_buffer);
+//        context->request_buffer = NULL;
+//        context->request_buffer = new_request_buffer;
+//
+//    }
 
     return close_result;
 }
@@ -300,42 +290,31 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
 bool handle_client(int client_fd, const char *www_folder,http_context* context,int nfds) {
     char buffer[BUF_SIZE];
     memset(buffer, 0, BUF_SIZE);
-    size_t total_read = 0;
-    while (total_read < BUF_SIZE){
-        ssize_t  bytes_read = read(client_fd, buffer+total_read, BUF_SIZE-total_read);
 
-        if (bytes_read <= 0) {
-            if (bytes_read == 0) {
-                fprintf(stderr,"The is read 0\n");
-                return true;
+    ssize_t  bytes_read = read(client_fd, buffer, BUF_SIZE);
+
+    if (bytes_read <= 0) {
+        if (bytes_read == 0) {
+            fprintf(stderr,"The is read 0\n");
+            return true;
+        } else {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // No more data available for now (non-blocking mode)
+                fprintf(stderr,"No data available, try again later.\n");
+                return false;
             } else {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // No more data available for now (non-blocking mode)
-                    fprintf(stderr,"No data available, try again later.\n");
-                    break;
-                } else {
-                    fprintf(stderr,"Error reading from file descriptor");
+                fprintf(stderr,"Error reading from file descriptor");
 
-                    break;
-                }
+                return false;
             }
-            // Indicate that the connection should be closed
-
         }
-        total_read+=bytes_read;
+        // Indicate that the connection should be closed
 
     }
-
-    if(total_read == 0){
-        return false;
-    }
-
-
-
 
     fprintf(stderr,"The nfds is %d\n",nfds);
 
-    char *new_buffer = realloc(context->request_buffer, context->buffer_size + total_read);
+    char *new_buffer = realloc(context->request_buffer, context->buffer_size + bytes_read);
     if (!new_buffer){
         fprintf(stderr, "Failed to allocate memory for request buffer\n");
         return true; // Indicate that the connection should be closed
@@ -343,61 +322,69 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
     context->request_buffer = new_buffer;
 
-    memcpy(context->request_buffer + context->buffer_size, buffer, total_read);
+    memcpy(context->request_buffer + context->buffer_size, buffer, bytes_read);
 
-    context->buffer_size+=total_read;
-    fprintf(stderr,"The bytes read is %ld\n",total_read);
+    context->buffer_size+=bytes_read;
 
-    while(context->buffer_size  > 0){
+    while(context->buffer_size > 0){
 
-            Request request;
-            memset(&request, 0, sizeof(request));
+        Request request;
+        memset(&request, 0, sizeof(request));
 
-            test_error_code_t parse_result = parse_http_request(context->request_buffer,context->buffer_size,&request);
+        test_error_code_t parse_result = parse_http_request(context->request_buffer,context->buffer_size,&request);
 
-            if(parse_result == TEST_ERROR_NONE){
+        if(parse_result == TEST_ERROR_NONE){
 
-                char *content_length_str = get_header_value(&request, CONTENT_LENGTH_STR);
-                size_t content_length = content_length_str ? strtoul(content_length_str, NULL, 10) : 0;
+            char *content_length_str = get_header_value(&request, CONTENT_LENGTH_STR);
+            size_t content_length = content_length_str ? strtoul(content_length_str, NULL, 10) : 0;
 
-                //context->content_size <= context->body_size
+            //context->content_size <= context->body_size
 
-                if(context->buffer_size >=request.status_header_size + content_length){
-
-
-                    bool is_close = handle_request(&request,client_fd,www_folder,context,content_length);
-
-                    if(is_close){
-
-                        return true;
-                    }
+            if(context->buffer_size >=request.status_header_size + content_length){
 
 
+                bool is_close = handle_request(&request,client_fd,www_folder,context,content_length);
 
-                    fprintf(stderr,"Correct here22\n");
-                    fprintf(stderr,"in the loop :the close is %d\n",is_close);
+                if(is_close){
 
-
-
-                }else{
-                    // file content not fully get
-                    return false;
+                    return true;
                 }
 
-            } else if (parse_result == TEST_ERROR_PARSE_PARTIAL){
-                return false;
-            }else if(parse_result == TEST_ERROR_PARSE_FAILED){
-                fprintf(stderr,"parse error\n");
-                return false;
+                fprintf(stderr,"Correct here22\n");
+                fprintf(stderr,"the close is %d\n",is_close);
+
+                    context->buffer_size-=request.status_header_size + content_length;
+
+    if(context->buffer_size == 0){
+        free(context->request_buffer);
+        context->request_buffer = NULL;
+
+    }else{
+
+        char* new_request_buffer = malloc(context->buffer_size);
+        memcpy(new_request_buffer,context->request_buffer+request.status_header_size + content_length,context->buffer_size);
+        free(context->request_buffer);
+        context->request_buffer = NULL;
+        context->request_buffer = new_request_buffer;
+
+    }
+
 
 
             }else{
+                // file content not fully get
                 return false;
             }
 
-
+        } else if (parse_result == TEST_ERROR_PARSE_PARTIAL){
+            return false;
+        }else if(parse_result == TEST_ERROR_PARSE_FAILED){
+            fprintf(stderr,"parse error\n");
+            return false;
+        }else{
+            return false;
+        }
     }
-    fprintf(stderr,"outer sider loop\n");
 
     return true;
 
@@ -509,7 +496,7 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr,"the index is %d\n",i);
                     bool is_close = handle_client(fds[i].fd, www_folder, &request_storage[i],nfds);
 
-                    fprintf(stderr,"poll main loop %d\n",is_close);
+                    fprintf(stderr,"the is close is %d\n",is_close);
                     if (is_close) {
                         fprintf(stderr, "Closing client at index %d\n", i);
                         close(fds[i].fd);
@@ -533,7 +520,6 @@ int main(int argc, char *argv[]) {
     }
 
     close(server_fd);
-    fprintf(stderr,"exit the loop\n");
 
     return EXIT_SUCCESS;
 }
