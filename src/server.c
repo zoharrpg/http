@@ -399,7 +399,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
     }
     fprintf(stderr,"outer sider loop\n");
 
-    return false;
+    return true;
 
 }
 
