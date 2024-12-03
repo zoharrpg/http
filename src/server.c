@@ -373,6 +373,8 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
     context->buffer_size+=bytes_read;
 
     while(context->buffer_size > 0){
+        fprintf(stderr,"the context buffer size is %ld\n",context->buffer_size);
+
 
         Request request;
         memset(&request, 0, sizeof(request));
@@ -388,16 +390,12 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
 
                 bool is_close = handle_request(&request,client_fd,www_folder,context,content_length);
-                fprintf(stderr,"the context buffer size is %ld\n",context->buffer_size);
 
                 if(is_close){
-
-
+                    fprintf(stderr,"the context buffer size is %ld after handle\n",context->buffer_size);
                     return true;
                 }
 
-                fprintf(stderr,"Correct here22\n");
-                fprintf(stderr,"the close is %d\n",is_close);
 
             }else{
                 // file content not fully get
@@ -407,6 +405,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
         }else{
             return false;
         }
+        fprintf(stderr,"the context buffer size is %ld after handle\n",context->buffer_size);
     }
 
     return false;
