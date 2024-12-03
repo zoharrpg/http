@@ -119,7 +119,7 @@ bool write_all(int client_fd, const char *buffer, size_t length) {
             return false;
         } else {
             // bytes_written == -1, handle errors
-            if (errno == EINTR) {
+            if (errno == EINTR){
                 // Interrupted, retry write
                 continue;
             } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -269,7 +269,6 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
             }
         }
 
-
     }else{
         if(strcmp(request->http_method,GET)==0 || strcmp(request->http_method, HEAD) == 0){
 
@@ -380,6 +379,18 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
         memset(&request, 0, sizeof(request));
 
         test_error_code_t parse_result = parse_http_request(context->request_buffer,context->buffer_size,&request);
+//        //const char *header_end = strstr(context->request_buffer, "\r\n\r\n");
+//        size_t header_length;
+//        if (header_end != NULL) {
+//            // Found the delimiter, calculate position
+//            header_length = header_end - context->request_buffer + strlen("\r\n\r\n");
+//            printf("Delimiter found at position: %ld\n", header_length);
+//            printf("Header:\n%.*s\n", (int)header_length, context->request_buffer);
+//        } else {
+//            // Delimiter not found
+//            printf("Delimiter not found.\n");
+//        }
+//        fprintf(stderr,"The header length from the str is %ld and parser_result is %ld\n",header_length,request.status_header_size);
 
         if(parse_result == TEST_ERROR_NONE){
 
@@ -411,6 +422,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
     return false;
 
 }
+
 int main(int argc, char *argv[]) {
     /* Validate and parse args */
 //    fprintf(stderr,"Correct here\n");
@@ -437,8 +449,9 @@ int main(int argc, char *argv[]) {
     make_socket_non_blocking(server_fd);
 
     int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
-               sizeof(opt));
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt,sizeof(opt));
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &opt,sizeof(opt));
+
     struct sockaddr_in server_addr = {.sin_family = AF_INET,
             .sin_port = htons(HTTP_PORT),
             .sin_addr.s_addr = INADDR_ANY};
@@ -459,9 +472,9 @@ int main(int argc, char *argv[]) {
 
     struct pollfd fds[MAX_CONNECTIONS + 1];
 
+
     fds[0].fd = server_fd;
-    fds[0].events = POLLIN | POLLHUP;
-    fds[0].revents = 0;
+    fds[0].events = POLLIN;
     int nfds = 1;
 
     http_context  request_storage[MAX_CONNECTIONS+1];
@@ -485,13 +498,8 @@ int main(int argc, char *argv[]) {
                     int client_fd = accept(server_fd, NULL, NULL);
                         fprintf(stderr,"the client_fd is %d\n",client_fd);
 
-                        if (client_fd == -1) {
-                            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                                break; // No more pending connections
-                            } else {
-                                fprintf(stderr,"accept failed");
-                                break;
-                            }
+                        if (client_fd <0) {
+                            continue;
                         }
                         make_socket_non_blocking(client_fd);
 
@@ -503,7 +511,7 @@ int main(int argc, char *argv[]) {
                         }
 
                         fds[nfds].fd = client_fd;
-                        fds[nfds].events = POLLIN | POLLHUP | POLLERR;
+                        fds[nfds].events = POLLIN;
                         request_storage[nfds].request_buffer = NULL;
                         request_storage[nfds].buffer_size=0;
 
@@ -529,14 +537,6 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                 }
-            } else if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR) {
-                fprintf(stderr, "Error or hangup on client at index %d\n", i);
-                reset_context(&request_storage[i]);
-                close(fds[i].fd);
-                fds[i] = fds[nfds - 1];
-                request_storage[i] = request_storage[nfds - 1];
-                nfds--;
-                break;
             }
         }
     }
