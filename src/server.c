@@ -338,7 +338,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
         if (bytes_read <= 0) {
             if (bytes_read == 0) {
                 fprintf(stderr,"The is read 0\n");
-                return false;
+                return true;
             } else {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     // No more data available for now (non-blocking mode)
@@ -355,10 +355,6 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
         }
         total_read+=bytes_read;
 
-    }
-
-    if(total_read<=0){
-        return false;
     }
 
     fprintf(stderr,"The nfds is %d\n",nfds);
