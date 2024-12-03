@@ -107,6 +107,33 @@ char *get_header_value(const Request *request, const char *header_name) {
     return NULL; // Header not found
 }
 
+bool write_all(int client_fd, const char *buffer, size_t length) {
+    size_t total_written = 0;
+    while (total_written < length) {
+        ssize_t bytes_written = write(client_fd, buffer + total_written, length - total_written);
+        if (bytes_written > 0) {
+            total_written += bytes_written;
+        } else if (bytes_written == 0) {
+            // Connection closed by client
+            fprintf(stderr, "Connection closed by client\n");
+            return false;
+        } else {
+            // bytes_written == -1, handle errors
+            if (errno == EINTR) {
+                // Interrupted, retry write
+                continue;
+            } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Non-blocking mode, try again
+                continue;
+            } else {
+                fprintf(stderr,"write\n");
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool send_response(int client_fd, const char *status, const char *content_type,
                    const char *body, const char *last_modified) {
 
@@ -119,17 +146,9 @@ bool send_response(int client_fd, const char *status, const char *content_type,
             &response, &response_len, status, (char *) content_type, content_length,
             (char *) last_modified, body ? strlen(body) : 0, (char *) body);
 
-    size_t total_write = 0;
-    while(response_len > total_write){
-        size_t  writen_byte = write(client_fd, response + total_write, response_len-total_write);
-        if(writen_byte == -1){
-            fprintf(stderr,"Write error\n");
-            return false;
-        }
-        total_write+=writen_byte;
-    }
+    bool write_result = write_all(client_fd, response, response_len);
     free(response);
-    return true;
+    return write_result;
 }
 
 bool handle_get_head(Request *request, int client_fd, const char *www_folder) {
@@ -203,19 +222,11 @@ bool handle_get_head(Request *request, int client_fd, const char *www_folder) {
     serialize_http_response(&resource, &resource_len, OK, (char *) mime_type,
                             content_length, last_modified, file_size, file_content);
 
-    size_t total_write = 0;
-    while(resource_len > total_write){
-        size_t  writen_byte = write(client_fd, resource + total_write, resource_len-total_write);
-        if(writen_byte == -1){
-            fprintf(stderr,"Write error\n");
-            return false ;
-        }
-        total_write+=writen_byte;
-    }
+    bool write_result = write_all(client_fd, resource, resource_len);
 
     free(resource);
     free(file_content);
-    return true;
+    return write_result;
 }
 
 bool handle_post(Request *request, int client_fd,http_context* context,size_t content_length) {
@@ -223,17 +234,10 @@ bool handle_post(Request *request, int client_fd,http_context* context,size_t co
 
     fprintf(stderr,"the post is size is %ld\n",request->status_header_size + content_length);
 
-    size_t  total_writen = 0;
-
-    while(request->status_header_size + content_length>total_writen){
-        size_t  writen_byte = write(client_fd, context->request_buffer+total_writen,request->status_header_size + content_length - total_writen);
-        if(writen_byte == -1){
-            fprintf(stderr, "Error writing response to client\n");
-            return false;
-        }
-        total_writen+=writen_byte;
-    }
-    return true;
+    
+    bool write_result = write_all(client_fd, context->request_buffer, request->status_header_size + content_length);
+    
+    return write_result;
 
 
 }
