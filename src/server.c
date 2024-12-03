@@ -124,7 +124,7 @@ bool write_all(int client_fd, const char *buffer, size_t length) {
                 continue;
             } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 // Non-blocking mode, try again
-                continue;
+                return false;
             } else {
                 fprintf(stderr,"write\n");
                 return false;
