@@ -226,11 +226,15 @@ void handle_post(Request *request, int client_fd,http_context* context,size_t co
     size_t  total_writen = 0;
 
     while(request->status_header_size + content_length>=total_writen){
+        fprintf(stderr,"infinit write\n");
         size_t  writen_byte = write(client_fd, context->request_buffer+total_writen,request->status_header_size + content_length - total_writen);
-        if(writen_byte == -1){
+        if(writen_byte == -1 || writen_byte == 0){
             fprintf(stderr, "Error writing response to client\n");
             return;
         }
+        fprintf(stderr,"The writen byte is %ld\n",writen_byte);
+        fprintf(stderr,"The header size is %ld\n",request->status_header_size);
+        fprintf(stderr,"The content length is %ld\n",content_length);
         total_writen+=writen_byte;
     }
 
