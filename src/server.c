@@ -307,7 +307,7 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
     }
 
     if(is_write){
-        context->buffer_size-=request->status_header_size + content_length;
+        context->buffer_size-= request->status_header_size + content_length;
 
         if(context->buffer_size == 0){
             free(context->request_buffer);
@@ -323,6 +323,8 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
 
         }
 
+    }else{
+        fprintf(stderr,"write not successful\n");
     }
 
 
@@ -333,20 +335,18 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
     char buffer[BUF_SIZE];
     memset(buffer, 0, BUF_SIZE);
-    ssize_t  total_read = 0;
-    while(total_read < BUF_SIZE){
 
-        ssize_t  bytes_read = read(client_fd, buffer + total_read, BUF_SIZE - total_read);
+    ssize_t  bytes_read = read(client_fd, buffer, BUF_SIZE);
 
-        if (bytes_read <= 0) {
+    if (bytes_read <= 0) {
             if (bytes_read == 0) {
                 fprintf(stderr,"The is read 0\n");
-                return false;
+                return true;
             } else {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     // No more data available for now (non-blocking mode)
                     fprintf(stderr,"No data available, try again later.\n");
-                    break;
+                    return false;
                 } else {
                     fprintf(stderr,"Error reading from file descriptor");
 
@@ -354,15 +354,13 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                 }
             }
             // Indicate that the connection should be closed
-
-        }
-        total_read+=bytes_read;
-
     }
+
+
 
     fprintf(stderr,"The nfds is %d\n",nfds);
 
-    char *new_buffer = realloc(context->request_buffer, context->buffer_size + total_read);
+    char *new_buffer = realloc(context->request_buffer, context->buffer_size + bytes_read);
     if (!new_buffer){
         fprintf(stderr, "Failed to allocate memory for request buffer\n");
         return true; // Indicate that the connection should be closed
@@ -370,9 +368,9 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
     context->request_buffer = new_buffer;
 
-    memcpy(context->request_buffer + context->buffer_size, buffer, total_read);
+    memcpy(context->request_buffer + context->buffer_size, buffer, bytes_read);
 
-    context->buffer_size+=total_read;
+    context->buffer_size+=bytes_read;
 
     while(context->buffer_size > 0){
 
@@ -386,12 +384,11 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
             char *content_length_str = get_header_value(&request, CONTENT_LENGTH_STR);
             size_t content_length = content_length_str ? strtoul(content_length_str, NULL, 10) : 0;
 
-            //context->content_size <= context->body_size
-
             if(context->buffer_size >=request.status_header_size + content_length){
 
 
                 bool is_close = handle_request(&request,client_fd,www_folder,context,content_length);
+                fprintf(stderr,"the context buffer size is %ld\n",context->buffer_size);
 
                 if(is_close){
 
@@ -401,9 +398,6 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
                 fprintf(stderr,"Correct here22\n");
                 fprintf(stderr,"the close is %d\n",is_close);
-
-
-
 
             }else{
                 // file content not fully get
@@ -532,14 +526,15 @@ int main(int argc, char *argv[]) {
 
                     fprintf(stderr,"the is close is %d\n",is_close);
                     if (is_close) {
-                        fprintf(stderr,"The request storage buffer size %ld\n",request_storage[i].buffer_size);
+                        fprintf(stderr,"fd:%d The request storage buffer size %ld\n",fds[i].fd,request_storage[i].buffer_size);
                         fprintf(stderr, "Closing client at index %d\n", i);
+                        fprintf(stderr,"The fd is %d\n",fds[i].fd);
                         close(fds[i].fd);
                         reset_context(&request_storage[i]);
                         fds[i] = fds[nfds - 1];
                         request_storage[i] = request_storage[nfds - 1];
                         nfds--;
-                        i--;
+                        break;
                     }
                 }
             } else if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR) {
@@ -549,7 +544,7 @@ int main(int argc, char *argv[]) {
                 fds[i] = fds[nfds - 1];
                 request_storage[i] = request_storage[nfds - 1];
                 nfds--;
-                i--;
+                break;
             }
         }
     }
