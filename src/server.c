@@ -399,21 +399,6 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                 fprintf(stderr,"Correct here22\n");
                 fprintf(stderr,"the close is %d\n",is_close);
 
-//                    context->buffer_size-=request.status_header_size + content_length;
-//
-//    if(context->buffer_size == 0){
-//        free(context->request_buffer);
-//        context->request_buffer = NULL;
-//
-//    }else{
-//
-//        char* new_request_buffer = malloc(context->buffer_size);
-//        memcpy(new_request_buffer,context->request_buffer+request.status_header_size + content_length,context->buffer_size);
-//        free(context->request_buffer);
-//        context->request_buffer = NULL;
-//        context->request_buffer = new_request_buffer;
-//
-//    }
 
 
 
@@ -432,7 +417,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
         }
     }
 
-    return false;
+    return true;
 
 }
 
@@ -544,6 +529,7 @@ int main(int argc, char *argv[]) {
 
                     fprintf(stderr,"the is close is %d\n",is_close);
                     if (is_close) {
+                        fprintf(stderr,"The request storage buffer size %ld\n",request_storage[i].buffer_size);
                         fprintf(stderr, "Closing client at index %d\n", i);
                         close(fds[i].fd);
                         reset_context(&request_storage[i]);
