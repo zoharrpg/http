@@ -124,7 +124,7 @@ bool write_all(int client_fd, const char *buffer, size_t length) {
                 continue;
             } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 // Non-blocking mode, try again
-                return false;
+                continue;
             } else {
                 fprintf(stderr,"write\n");
                 return false;
@@ -404,11 +404,6 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                 return false;
             }
 
-        } else if (parse_result == TEST_ERROR_PARSE_PARTIAL){
-            return false;
-        }else if(parse_result == TEST_ERROR_PARSE_FAILED){
-            fprintf(stderr,"parse error\n");
-            return false;
         }else{
             return false;
         }
@@ -417,8 +412,6 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
     return false;
 
 }
-
-
 int main(int argc, char *argv[]) {
     /* Validate and parse args */
 //    fprintf(stderr,"Correct here\n");
