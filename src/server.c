@@ -481,9 +481,10 @@ int main(int argc, char *argv[]) {
 
                 if (fds[i].fd == server_fd) {
                     // Accept all pending connections
-                    while (true) {
-                        int client_fd = accept(server_fd, NULL, NULL);
+
+                    int client_fd = accept(server_fd, NULL, NULL);
                         fprintf(stderr,"the client_fd is %d\n",client_fd);
+
                         if (client_fd == -1) {
                             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                                 break; // No more pending connections
@@ -492,7 +493,6 @@ int main(int argc, char *argv[]) {
                                 break;
                             }
                         }
-
                         make_socket_non_blocking(client_fd);
 
                         if (nfds-1 >= MAX_CONNECTIONS) {
@@ -509,7 +509,7 @@ int main(int argc, char *argv[]) {
 
                         fprintf(stderr, "New client initialized at index %d\n", nfds);
                         nfds++;
-                    }
+
 
                 } else {
                     // Handle client request
