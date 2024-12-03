@@ -287,7 +287,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
             } else {
                 fprintf(stderr,"Error reading from file descriptor");
 
-                return true;
+                return false;
             }
         }
          // Indicate that the connection should be closed
@@ -323,8 +323,6 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                 //context->content_size <= context->body_size
 
                 if(context->buffer_size >=request.status_header_size + content_length){
-//                    fprintf(stderr,"content size is %ld\n",context->content_size);
-//                    fprintf(stderr,"body size is %ld\n",context->body_size);
 
 
                     bool is_close = handle_request(&request,client_fd,www_folder,context,content_length);
@@ -364,6 +362,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
             }else if(parse_result == TEST_ERROR_PARSE_FAILED){
                 fprintf(stderr,"parse error\n");
                 return false;
+
 
             }else{
                 return true;
@@ -409,8 +408,7 @@ int main(int argc, char *argv[]) {
             .sin_port = htons(HTTP_PORT),
             .sin_addr.s_addr = INADDR_ANY};
 
-    if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) ==
-        -1) {
+    if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) ==-1) {
         fprintf(stderr, "Binding failed\n");
         close(server_fd);
         return EXIT_FAILURE;
