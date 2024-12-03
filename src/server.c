@@ -317,6 +317,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
 
                     context->buffer_size-=request.status_header_size + content_length;
+
                     if(context->buffer_size == 0){
                         free(context->request_buffer);
                         context->request_buffer = NULL;
@@ -428,10 +429,10 @@ int main(int argc, char *argv[]) {
 
                 if (fds[i].fd == server_fd) {
                     // Accept all pending connections
-                    while (true) {
-                        int client_fd = accept(server_fd, NULL, NULL);
-                        fprintf(stderr,"the client_fd is %d\n",client_fd);
-                        if (client_fd == -1) {
+
+                    int client_fd = accept(server_fd, NULL, NULL);
+                    fprintf(stderr,"the client_fd is %d\n",client_fd);
+                    if (client_fd == -1) {
                             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                                 break; // No more pending connections
                             } else {
@@ -456,7 +457,8 @@ int main(int argc, char *argv[]) {
 
                         fprintf(stderr, "New client initialized at index %d\n", nfds);
                         nfds++;
-                    }
+
+
                 } else {
                     // Handle client request
                     fprintf(stderr,"the index is %d\n",i);
