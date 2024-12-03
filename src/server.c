@@ -225,7 +225,7 @@ void handle_post(Request *request, int client_fd,http_context* context,size_t co
 
     size_t  total_writen = 0;
 
-    while(request->status_header_size + content_length>total_writen){
+    while(request->status_header_size + content_length>=total_writen){
         size_t  writen_byte = write(client_fd, context->request_buffer+total_writen,request->status_header_size + content_length - total_writen);
         if(writen_byte == -1){
             fprintf(stderr, "Error writing response to client\n");
@@ -241,7 +241,9 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
 
 
     char *close_state = get_header_value(request,CONNECTION_STR);
+
     bool close_result = false;
+
     if(close_state && strcasecmp(close_state,CLOSE)==0){
         fprintf(stderr,"compare successful\n");
         close_result = true;
@@ -337,7 +339,9 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                     if(context->buffer_size == 0){
                         free(context->request_buffer);
                         context->request_buffer = NULL;
+
                     }else{
+
                         char* new_request_buffer = malloc(context->buffer_size);
                         memcpy(new_request_buffer,context->request_buffer+request.status_header_size + content_length,context->buffer_size);
                         free(context->request_buffer);
@@ -370,7 +374,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
     }
 
-    return false;
+    return true;
 
 }
 
