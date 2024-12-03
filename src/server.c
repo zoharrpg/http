@@ -209,32 +209,15 @@ void handle_get_head(Request *request, int client_fd, const char *www_folder) {
 }
 
 void handle_post(Request *request, int client_fd,http_context* context,size_t content_length) {
-    // implement the handle post just echo the request body, also implement the
-    // large post request in the client Extract the Content-Length header to
-    // determine the body size Extract the body from the request
 
-//    char *body = request->body;
-//    size_t body_len = context->body_size;
-//    size_t total_size = sizeof(Request) + (request->body ? strlen(request->body) : 0);
-//
-//    // Prepare the response headers
-//    char content_length[32];
-//    snprintf(content_length, sizeof(content_length), "%ld", body_len);
 
-    // Send the response
-//    char *response;
-//    size_t response_len;
-//    serialize_http_response(&response, &response_len, OK, get_header_value(request,"Content-Type"),
-//                            content_length, NULL, body_len, body);
-//    fprintf(stderr,"post header size is %ld\n",context->request_header_size);
+
     size_t  write_byte = write(client_fd, context->request_buffer,request->status_header_size + content_length);
     fprintf(stderr,"the post is size is %ld\n",request->status_header_size + content_length);
 
     if ( write_byte != request->status_header_size + content_length) {
         fprintf(stderr, "Error writing response to client\n");
     }
-//    fprintf(stderr,"after post header size is %ld\n",context->request_header_size);
-//    fprintf(stderr,"after post write size is %ld\n",write_byte);
 
 }
 
@@ -292,6 +275,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
          // Indicate that the connection should be closed
 
     }
+
     fprintf(stderr,"The nfds is %d\n",nfds);
 
     char *new_buffer = realloc(context->request_buffer, context->buffer_size + bytes_read);
@@ -358,11 +342,11 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
             } else if (parse_result == TEST_ERROR_PARSE_PARTIAL){
                 return false;
             }else if(parse_result == TEST_ERROR_PARSE_FAILED){
+                fprintf(stderr,"parse error\n");
                 return false;
 
             }else{
-                fprintf(stderr,"parse error\n");
-                return true;
+                return false;
             }
 
 
