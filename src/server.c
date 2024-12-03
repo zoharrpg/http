@@ -348,7 +348,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
                     fprintf(stderr,"Correct here22\n");
                     fprintf(stderr,"the close is %d\n",is_close);
 
-                    return is_close;
+
 
                 }else{
                     // file content not fully get
