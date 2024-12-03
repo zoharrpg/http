@@ -429,10 +429,10 @@ int main(int argc, char *argv[]) {
 
                 if (fds[i].fd == server_fd) {
                     // Accept all pending connections
-
-                    int client_fd = accept(server_fd, NULL, NULL);
-                    fprintf(stderr,"the client_fd is %d\n",client_fd);
-                    if (client_fd == -1) {
+                    while (true) {
+                        int client_fd = accept(server_fd, NULL, NULL);
+                        fprintf(stderr,"the client_fd is %d\n",client_fd);
+                        if (client_fd == -1) {
                             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                                 break; // No more pending connections
                             } else {
@@ -457,7 +457,7 @@ int main(int argc, char *argv[]) {
 
                         fprintf(stderr, "New client initialized at index %d\n", nfds);
                         nfds++;
-
+                    }
 
                 } else {
                     // Handle client request
