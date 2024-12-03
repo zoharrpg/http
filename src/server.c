@@ -243,7 +243,7 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
     if (strcmp(request->http_version, HTTP_VER) != 0){
         send_response(client_fd, BAD_REQUEST, "text/plain", "Wrong HTTP version", NULL);
 
-        return true;
+        return false;
     }
 
     if(strcmp(request->http_method,GET)==0 || strcmp(request->http_method, HEAD) == 0){
@@ -255,7 +255,7 @@ bool handle_request(Request *request, int client_fd, const char *www_folder,http
         handle_post(request,client_fd,context,content_length);
     }else{
         send_response(client_fd, BAD_REQUEST, "text/plain", "Method wrong problem", NULL);
-        return true;
+        return false;
     }
     char *close_state = get_header_value(request,CONNECTION_STR);
 
@@ -328,6 +328,7 @@ bool handle_client(int client_fd, const char *www_folder,http_context* context,i
 
 
                     bool is_close = handle_request(&request,client_fd,www_folder,context,content_length);
+
                     if(is_close){
                         return true;
                     }
