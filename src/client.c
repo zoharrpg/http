@@ -9,7 +9,6 @@
  * without the express permission of the 15-441/641 course staff.
  */
 
-
 #include <sys/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,10 +34,16 @@
 #define WWW_FOLDER "./www"
 #define MAX_RETRIES 3
 #define POLL_TIMEOUT 5000
-#define MAX_CONCURRENT_REQUESTS 4
-#define DEFAULT_PARALLEL_CONNECTIONS 6
-#define MAX_REQUESTS_PER_CONNECTION 4
 #define RECONNECT_TIMEOUT 100
+
+// Define default values for parallel connections and inflight requests
+#ifndef PARALLEL_CONNECTIONS
+#define PARALLEL_CONNECTIONS 4  
+#endif
+
+#ifndef MAX_INFLIGHT_REQUESTS
+#define MAX_INFLIGHT_REQUESTS 6  
+#endif
 
 typedef enum {
     RESOURCE_PENDING,
@@ -62,7 +67,12 @@ typedef struct {
     int retry_count;
     int assigned_connection;
 } Resource;
-
+typedef struct WriteBuffer {
+    char *buffer;
+    size_t size;
+    size_t offset;
+    struct WriteBuffer *next;
+} WriteBuffer;
 typedef struct {
     char *buffer;
     size_t buffer_size;
@@ -79,13 +89,17 @@ typedef struct {
 typedef struct {
     int sock_fd;
     ResponseState response;
-    char inflight_requests[MAX_CONCURRENT_REQUESTS][HTTP_SIZE];
+    char inflight_requests[MAX_INFLIGHT_REQUESTS][HTTP_SIZE];
     int num_inflight;
     ConnectionState state;
     size_t total_requests;
+     int index;
     time_t last_activity;
     bool processing_response;
+    WriteBuffer *write_queue_head;  // Pointer to the head of the write buffer queue
+    WriteBuffer *write_queue_tail;  // Pointer to the tail of the write buffer queue
 } Connection;
+
 
 // Global variables
 static Resource resources[MAX_RESOURCES];
@@ -130,34 +144,43 @@ void close_connection(Connection *conn) {
     conn->state = CONNECTION_STATE_DISCONNECTED;
     conn->num_inflight = 0;
     conn->processing_response = false;
+        WriteBuffer *current = conn->write_queue_head;
+    while (current) {
+        WriteBuffer *next = current->next;
+        free(current->buffer);
+        free(current);
+        current = next;
+    }
+    conn->write_queue_head = conn->write_queue_tail = NULL;
 }
 
 test_error_code_t setup_connection(Connection *conn, struct sockaddr_in server_addr) {
     if (conn->sock_fd != -1) {
         close(conn->sock_fd);
     }
-    
+
     conn->sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (conn->sock_fd < 0) {
-        return TEST_ERROR_HTTP_CONNECT_FAILED;  // Changed from TEST_ERROR_SOCKET_FAILED
+        return TEST_ERROR_HTTP_CONNECT_FAILED;
     }
-    
+
     make_socket_non_blocking(conn->sock_fd);
-    
+
     if (connect(conn->sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         if (errno != EINPROGRESS) {
             close(conn->sock_fd);
             conn->sock_fd = -1;
-            return TEST_ERROR_HTTP_CONNECT_FAILED;  // Changed from TEST_ERROR_CONNECT_FAILED
+            return TEST_ERROR_HTTP_CONNECT_FAILED;
         }
     }
-    
+
     init_response_state(&conn->response);
     conn->num_inflight = 0;
     conn->state = CONNECTION_STATE_CONNECTING;
     conn->last_activity = time(NULL);
     return TEST_ERROR_NONE;
 }
+
 void *portable_memmem(const void *haystack, size_t haystack_len, const void *needle, size_t needle_len) {
     if (!haystack || !needle || needle_len == 0 || haystack_len < needle_len) {
         return NULL;
@@ -174,6 +197,8 @@ void *portable_memmem(const void *haystack, size_t haystack_len, const void *nee
 
     return NULL;
 }
+
+
 bool parse_dependency_csv(const char *content, size_t content_length) {
     char *content_copy = strndup(content, content_length);
     if (!content_copy) return false;
@@ -236,8 +261,6 @@ bool parse_dependency_csv(const char *content, size_t content_length) {
     return true;
 }
 
-
-
 Connection* find_best_connection() {
     for (int i = 0; i < num_connections; i++) {
         if (connections[i].state == CONNECTION_STATE_CONNECTED &&
@@ -248,11 +271,7 @@ Connection* find_best_connection() {
     return NULL;
 }
 
-
-
-
-
-test_error_code_t queue_http_request(Connection *conn, Resource *resource) {
+test_error_code_t queue_http_request(Connection *conn, Resource *resource,int conn_index) {
     Request request;
     memset(&request, 0, sizeof(Request));
 
@@ -305,12 +324,23 @@ test_error_code_t queue_http_request(Connection *conn, Resource *resource) {
         free(request_buffer);
         return result;
     }
+  WriteBuffer *new_write = malloc(sizeof(WriteBuffer));
+    if (!new_write) {
+        free(request_buffer);
+        return TEST_ERROR_HTTP_SEND_FAILED;
+    }
+    new_write->buffer = request_buffer;
+    new_write->size = request_size;
+    new_write->offset = 0;
+    new_write->next = NULL;
 
-    // Set up the write buffer in the response state
-    state->write_buffer = request_buffer;
-    state->write_size = request_size;
-    state->write_pending = true;
-    state->write_offset = 0;
+    if (conn->write_queue_tail) {
+        conn->write_queue_tail->next = new_write;
+        conn->write_queue_tail = new_write;
+    } else {
+        conn->write_queue_head = conn->write_queue_tail = new_write;
+    }
+
 
     // Update inflight requests
     strncpy(conn->inflight_requests[conn->num_inflight], resource->uri, HTTP_SIZE - 1);
@@ -319,21 +349,19 @@ test_error_code_t queue_http_request(Connection *conn, Resource *resource) {
 
     // Set resource as requested
     resource->requested = true;
-    resource->assigned_connection = conn - connections;
+    resource->assigned_connection = resource->assigned_connection = conn_index;;
 
-    fprintf(stderr, "Queued request for: %s on connection %ld\n", resource->uri, conn - connections);
+    fprintf(stderr, "Queued request for: %s on connection %ld\n", resource->uri, conn_index);
     return TEST_ERROR_NONE;
 }
 
-
-
 test_error_code_t queue_pending_requests() {
     fprintf(stderr, "Checking for pending requests...\n");
-    
+
     for (int i = 0; i < resource_count; i++) {
         if (!resources[i].requested && resources[i].state == RESOURCE_PENDING) {
             bool can_request = true;
-            
+
             // Check dependency
             if (resources[i].dependency[0] != '\0') {
                 can_request = false;
@@ -351,14 +379,14 @@ test_error_code_t queue_pending_requests() {
                     }
                 }
             }
-            
+
             if (can_request) {
                 // Try all available connections
                 for (int j = 0; j < num_connections; j++) {
                     if (connections[j].state == CONNECTION_STATE_CONNECTED &&
-                        connections[j].num_inflight < MAX_CONCURRENT_REQUESTS) {
-                        
-                        if (queue_http_request(&connections[j], &resources[i]) == TEST_ERROR_NONE) {
+                        connections[j].num_inflight < MAX_INFLIGHT_REQUESTS) {
+
+                        if (queue_http_request(&connections[j], &resources[i],j) == TEST_ERROR_NONE) {
                             fprintf(stderr, "Successfully queued '%s' on connection %d\n",
                                     resources[i].uri, j);
                             break;
@@ -368,7 +396,7 @@ test_error_code_t queue_pending_requests() {
             }
         }
     }
-    
+
     // Print current state
     fprintf(stderr, "\nCurrent resource states:\n");
     for (int i = 0; i < resource_count; i++) {
@@ -379,35 +407,38 @@ test_error_code_t queue_pending_requests() {
                 resources[i].requested,
                 resources[i].assigned_connection);
     }
-    
+
     return TEST_ERROR_NONE;
 }
 
 test_error_code_t try_send_request(Connection *conn) {
-    ResponseState *state = &conn->response;
-    if (!state->write_pending) {
-        return TEST_ERROR_NONE;
-    }
+    while (conn->write_queue_head) {
+        WriteBuffer *current_write = conn->write_queue_head;
+        while (current_write->offset < current_write->size) {
+            ssize_t sent = write(conn->sock_fd,
+                                 current_write->buffer + current_write->offset,
+                                 current_write->size - current_write->offset);
 
-    while (state->write_offset < state->write_size) {
-        ssize_t sent = write(conn->sock_fd, 
-                           state->write_buffer + state->write_offset,
-                           state->write_size - state->write_offset);
-        
-        if (sent < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                return TEST_ERROR_PARSE_PARTIAL;
+            if (sent < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    return TEST_ERROR_PARSE_PARTIAL;
+                }
+                return TEST_ERROR_HTTP_SEND_FAILED;
             }
-            return TEST_ERROR_HTTP_SEND_FAILED;
+            current_write->offset += sent;
         }
-        state->write_offset += sent;
+        // Finished sending this write buffer
+        conn->write_queue_head = current_write->next;
+        if (conn->write_queue_head == NULL) {
+            conn->write_queue_tail = NULL;
+        }
+        free(current_write->buffer);
+        free(current_write);
     }
-
-    free(state->write_buffer);
-    state->write_buffer = NULL;
-    state->write_pending = false;
     return TEST_ERROR_NONE;
 }
+
+
 void save_file(const char *uri, const char *body, size_t body_length) {
     char filepath[PATH_MAX];
 
@@ -440,6 +471,7 @@ void save_file(const char *uri, const char *body, size_t body_length) {
         fprintf(stderr, "Failed to open file for writing: %s (error: %s)\n", filepath, strerror(errno));
     }
 }
+
 test_error_code_t process_response(Connection *conn) {
     ResponseState *state = &conn->response;
     size_t buffer_offset = 0;
@@ -497,32 +529,32 @@ test_error_code_t process_response(Connection *conn) {
                     char *current_uri = conn->inflight_requests[0];
 
                     if (state->status_code == 200) {
-                     if (strcmp(current_uri, "/dependency.csv") == 0) {
-    // Parse dependency.csv
-    if (!parse_dependency_csv(body, body_length)) {
-        return TEST_ERROR_PARSE_FAILED;
-    }
+                        if (strcmp(current_uri, "/dependency.csv") == 0) {
+                            // Parse dependency.csv
+                            if (!parse_dependency_csv(body, body_length)) {
+                                return TEST_ERROR_PARSE_FAILED;
+                            }
 
-    // Mark `/dependency.csv` as downloaded
-    for (int i = 0; i < resource_count; i++) {
-        if (strcmp(resources[i].uri, current_uri) == 0) {
-            resources[i].state = RESOURCE_DOWNLOADED;
-            resources[i].requested = true;
-            fprintf(stderr, "Marked resource %s as downloaded\n", current_uri);
-            break;
-        }
-    }
-} else {
+                            // Mark `/dependency.csv` as downloaded
+                            for (int i = 0; i < resource_count; i++) {
+                                if (strcmp(resources[i].uri, current_uri) == 0) {
+                                    resources[i].state = RESOURCE_DOWNLOADED;
+                                    resources[i].requested = true;
+                                    fprintf(stderr, "Marked resource %s as downloaded\n", current_uri);
+                                    break;
+                                }
+                            }
+                        } else {
                             // Save the file
                             save_file(current_uri, body, body_length);
-                        }
 
-                        // Mark the resource as downloaded
-                        for (int i = 0; i < resource_count; i++) {
-                            if (strcmp(resources[i].uri, current_uri) == 0) {
-                                resources[i].state = RESOURCE_DOWNLOADED;
-                                fprintf(stderr, "Marked resource %s as downloaded\n", current_uri);
-                                break;
+                            // Mark the resource as downloaded
+                            for (int i = 0; i < resource_count; i++) {
+                                if (strcmp(resources[i].uri, current_uri) == 0) {
+                                    resources[i].state = RESOURCE_DOWNLOADED;
+                                    fprintf(stderr, "Marked resource %s as downloaded\n", current_uri);
+                                    break;
+                                }
                             }
                         }
                     } else {
@@ -562,16 +594,15 @@ test_error_code_t process_response(Connection *conn) {
     return TEST_ERROR_NONE;
 }
 
-
 void monitor_connections() {
     time_t current_time = time(NULL);
-    
+
     for (int i = 0; i < num_connections; i++) {
         Connection *conn = &connections[i];
-        
+
         if (conn->state == CONNECTION_STATE_CONNECTED &&
             current_time - conn->last_activity > POLL_TIMEOUT / 1000) {
-            
+
             fprintf(stderr, "Connection %d timed out, resetting\n", i);
             close_connection(conn);
         }
@@ -586,18 +617,18 @@ int main(int argc, char *argv[]) {
 
     // Create WWW folder
     mkdir(WWW_FOLDER, S_IRWXU);
-    
+
     // Initialize multiple connections
-    num_connections = DEFAULT_PARALLEL_CONNECTIONS;
+    num_connections = PARALLEL_CONNECTIONS;  // Use PARALLEL_CONNECTIONS
     connections = calloc(num_connections, sizeof(Connection));
     struct pollfd *pfds = calloc(num_connections, sizeof(struct pollfd));
-    
+
     // Set up server address
     struct sockaddr_in server_addr = {
         .sin_family = AF_INET,
         .sin_port = htons(HTTP_PORT)
     };
-    
+
     if (inet_pton(AF_INET, argv[1], &server_addr.sin_addr) <= 0) {
         fprintf(stderr, "Invalid address\n");
         return EXIT_FAILURE;
@@ -612,39 +643,39 @@ int main(int argc, char *argv[]) {
         pfds[i].fd = connections[i].sock_fd;
         pfds[i].events = POLLIN | POLLOUT;
     }
-// Initialize resources[] with /dependency.csv
-resource_count = 0;
-strncpy(resources[resource_count].uri, "/dependency.csv", HTTP_SIZE - 1);
-resources[resource_count].uri[HTTP_SIZE - 1] = '\0';
-resources[resource_count].dependency[0] = '\0'; // No dependency
-resources[resource_count].state = RESOURCE_PENDING;
-resources[resource_count].requested = false;
-resources[resource_count].retry_count = 0;
-resource_count++;
 
-// Find /dependency.csv in resources[]
-Resource *dependency_csv_resource = NULL;
-for (int i = 0; i < resource_count; i++) {
-    if (strcmp(resources[i].uri, "/dependency.csv") == 0) {
-        dependency_csv_resource = &resources[i];
-        break;
+    // Initialize resources[] with /dependency.csv
+    resource_count = 0;
+    strncpy(resources[resource_count].uri, "/dependency.csv", HTTP_SIZE - 1);
+    resources[resource_count].uri[HTTP_SIZE - 1] = '\0';
+    resources[resource_count].dependency[0] = '\0'; // No dependency
+    resources[resource_count].state = RESOURCE_PENDING;
+    resources[resource_count].requested = false;
+    resources[resource_count].retry_count = 0;
+    resource_count++;
+
+    // Find /dependency.csv in resources[]
+    Resource *dependency_csv_resource = NULL;
+    for (int i = 0; i < resource_count; i++) {
+        if (strcmp(resources[i].uri, "/dependency.csv") == 0) {
+            dependency_csv_resource = &resources[i];
+            break;
+        }
     }
-}
-if (dependency_csv_resource == NULL) {
-    fprintf(stderr, "Failed to find /dependency.csv in resources[]\n");
-    return EXIT_FAILURE;
-}
-if (queue_http_request(&connections[0], dependency_csv_resource) != TEST_ERROR_NONE) {
-    fprintf(stderr, "Failed to queue initial request\n");
-    return EXIT_FAILURE;
-}
-connections[0].total_requests++;
-
+    if (dependency_csv_resource == NULL) {
+        fprintf(stderr, "Failed to find /dependency.csv in resources[]\n");
+        return EXIT_FAILURE;
+    }
+    if (queue_http_request(&connections[0], dependency_csv_resource,connections[0].index) != TEST_ERROR_NONE) {
+        fprintf(stderr, "Failed to queue initial request\n");
+        return EXIT_FAILURE;
+    }
+    connections[0].total_requests++;
 
     bool all_done = false;
     while (!all_done) {
         monitor_connections();
-        
+
         int poll_result = poll(pfds, num_connections, POLL_TIMEOUT);
         if (poll_result < 0) {
             perror("poll failed");
@@ -654,76 +685,72 @@ connections[0].total_requests++;
         // Handle all connections
         for (int i = 0; i < num_connections; i++) {
             if (pfds[i].fd == -1) continue;
-    if (pfds[i].revents & POLLOUT) {
-        // Handle connection establishment
-        if (connections[i].state == CONNECTION_STATE_CONNECTING) {
-            int error = 0;
-            socklen_t len = sizeof(error);
-            if (getsockopt(pfds[i].fd, SOL_SOCKET, SO_ERROR, &error, &len) == 0 && error == 0) {
-                connections[i].state = CONNECTION_STATE_CONNECTED;
-                fprintf(stderr, "Connection %d established\n", i);
-            } else {
-                fprintf(stderr, "Connection %d failed to establish\n", i);
-                close_connection(&connections[i]);
-                pfds[i].fd = -1;
-                continue;
-            }
-        }
+            if (pfds[i].revents & POLLOUT) {
+                // Handle connection establishment
+                if (connections[i].state == CONNECTION_STATE_CONNECTING) {
+                    int error = 0;
+                    socklen_t len = sizeof(error);
+                    if (getsockopt(pfds[i].fd, SOL_SOCKET, SO_ERROR, &error, &len) == 0 && error == 0) {
+                        connections[i].state = CONNECTION_STATE_CONNECTED;
+                        fprintf(stderr, "Connection %d established\n", i);
+                    } else {
+                        fprintf(stderr, "Connection %d failed to establish: %s\n", i, strerror(error));
+                        close_connection(&connections[i]);
+                        pfds[i].fd = -1;
+                        continue;
+                    }
+                }
                 // Try to send pending requests
-        if (connections[i].response.write_pending) {
-            test_error_code_t result = try_send_request(&connections[i]);
-            if (result == TEST_ERROR_HTTP_SEND_FAILED) {
-                fprintf(stderr, "Failed to send request on connection %d\n", i);
-                close_connection(&connections[i]);
-                pfds[i].fd = -1;
-                continue;
+                if (connections[i].write_queue_head != NULL) {
+                    test_error_code_t result = try_send_request(&connections[i]);
+                    if (result == TEST_ERROR_HTTP_SEND_FAILED) {
+                        fprintf(stderr, "Failed to send request on connection %d\n", i);
+                        close_connection(&connections[i]);
+                        pfds[i].fd = -1;
+                        continue;
+                    }
+                }
             }
-        }
-    }
-if (pfds[i].revents & POLLIN) {
-    ResponseState *state = &connections[i].response;
+            if (pfds[i].revents & POLLIN) {
+                ResponseState *state = &connections[i].response;
 
-    char buf[BUF_SIZE];
-    ssize_t bytes_read = read(pfds[i].fd, buf, sizeof(buf));
+                char buf[BUF_SIZE];
+                ssize_t bytes_read = read(pfds[i].fd, buf, sizeof(buf));
 
-    if (bytes_read > 0) {
-        // Expand the buffer to hold new data
-        char *new_buffer = realloc(state->buffer, state->buffer_size + bytes_read);
-        if (!new_buffer) {
-            fprintf(stderr, "Memory allocation failed\n");
-            continue;
-        }
-        state->buffer = new_buffer;
+                if (bytes_read > 0) {
+                    // Expand the buffer to hold new data
+                    char *new_buffer = realloc(state->buffer, state->buffer_size + bytes_read);
+                    if (!new_buffer) {
+                        fprintf(stderr, "Memory allocation failed\n");
+                        continue;
+                    }
+                    state->buffer = new_buffer;
 
-        memcpy(state->buffer + state->buffer_size, buf, bytes_read);
-        state->buffer_size += bytes_read;
+                    memcpy(state->buffer + state->buffer_size, buf, bytes_read);
+                    state->buffer_size += bytes_read;
 
-        // Process the response(s)
-        test_error_code_t result = process_response(&connections[i]);
-        if (result != TEST_ERROR_NONE) {
-            fprintf(stderr, "Error processing response on connection %d\n", i);
-            close_connection(&connections[i]);
-            pfds[i].fd = -1;
-            continue;
-        }
+                    // Process the response(s)
+                    test_error_code_t result = process_response(&connections[i]);
+                    if (result != TEST_ERROR_NONE) {
+                        fprintf(stderr, "Error processing response on connection %d\n", i);
+                        close_connection(&connections[i]);
+                        pfds[i].fd = -1;
+                        continue;
+                    }
 
-        connections[i].last_activity = time(NULL);
-    } else if (bytes_read == 0) {
-        // Connection closed by server
-        fprintf(stderr, "Connection %d closed by server\n", i);
-        close_connection(&connections[i]);
-        pfds[i].fd = -1;
-    } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-        fprintf(stderr, "Read error on connection %d: %s\n",
-                i, strerror(errno));
-        close_connection(&connections[i]);
-        pfds[i].fd = -1;
-    }
-}
-
-
-
-
+                    connections[i].last_activity = time(NULL);
+                } else if (bytes_read == 0) {
+                    // Connection closed by server
+                    fprintf(stderr, "Connection %d closed by server\n", i);
+                    close_connection(&connections[i]);
+                    pfds[i].fd = -1;
+                } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    fprintf(stderr, "Read error on connection %d: %s\n",
+                            i, strerror(errno));
+                    close_connection(&connections[i]);
+                    pfds[i].fd = -1;
+                }
+            }
             if (pfds[i].revents & (POLLERR | POLLHUP)) {
                 fprintf(stderr, "Connection %d error or hangup\n", i);
                 close_connection(&connections[i]);
@@ -743,7 +770,7 @@ if (pfds[i].revents & POLLIN) {
             }
         }
 
-         queue_pending_requests();
+        queue_pending_requests();
 
         // Check if we're done
         if (resource_count > 0) {
@@ -766,6 +793,6 @@ if (pfds[i].revents & POLLIN) {
     }
     free(connections);
     free(pfds);
-    
+
     return EXIT_SUCCESS;
 }
