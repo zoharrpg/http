@@ -140,11 +140,33 @@ void close_connection(Connection *conn) {
         close(conn->sock_fd);
         conn->sock_fd = -1;
     }
+
+    // Mark inflight resources as not requested and handle retries
+    for (int i = 0; i < conn->num_inflight; i++) {
+        char *uri = conn->inflight_requests[i];
+        for (int j = 0; j < resource_count; j++) {
+            if (strcmp(resources[j].uri, uri) == 0) {
+                resources[j].retry_count++;
+                if (resources[j].retry_count >= MAX_RETRIES) {
+                    resources[j].state = RESOURCE_ERROR;
+                    fprintf(stderr, "Resource '%s' reached max retries. Marked as ERROR.\n", resources[j].uri);
+                } else {
+                    resources[j].requested = false;
+                    resources[j].assigned_connection = -1;
+                    fprintf(stderr, "Resource '%s' will be retried. Retry count: %d\n", resources[j].uri, resources[j].retry_count);
+                }
+                break;
+            }
+        }
+    }
+    conn->num_inflight = 0;
+
     init_response_state(&conn->response);
     conn->state = CONNECTION_STATE_DISCONNECTED;
-    conn->num_inflight = 0;
     conn->processing_response = false;
-        WriteBuffer *current = conn->write_queue_head;
+
+    // Free any pending write buffers
+    WriteBuffer *current = conn->write_queue_head;
     while (current) {
         WriteBuffer *next = current->next;
         free(current->buffer);
@@ -153,6 +175,7 @@ void close_connection(Connection *conn) {
     }
     conn->write_queue_head = conn->write_queue_tail = NULL;
 }
+
 
 test_error_code_t setup_connection(Connection *conn, struct sockaddr_in server_addr) {
     if (conn->sock_fd != -1) {
@@ -349,7 +372,7 @@ test_error_code_t queue_http_request(Connection *conn, Resource *resource,int co
 
     // Set resource as requested
     resource->requested = true;
-    resource->assigned_connection = resource->assigned_connection = conn_index;;
+    resource->assigned_connection = resource->assigned_connection = conn_index;
 
     fprintf(stderr, "Queued request for: %s on connection %ld\n", resource->uri, conn_index);
     return TEST_ERROR_NONE;
@@ -360,6 +383,7 @@ test_error_code_t queue_pending_requests() {
 
     for (int i = 0; i < resource_count; i++) {
         if (!resources[i].requested && resources[i].state == RESOURCE_PENDING) {
+           if( resources[i].retry_count < MAX_RETRIES) {
             bool can_request = true;
 
             // Check dependency
@@ -394,6 +418,7 @@ test_error_code_t queue_pending_requests() {
                     }
                 }
             }
+        }
         }
     }
 
@@ -681,7 +706,18 @@ int main(int argc, char *argv[]) {
             perror("poll failed");
             break;
         }
-
+    // Try to reestablish failed connections
+    for (int i = 0; i < num_connections; i++) {
+        if (pfds[i].fd == -1) {
+            test_error_code_t result = setup_connection(&connections[i], server_addr);
+            if (result == TEST_ERROR_NONE) {
+                pfds[i].fd = connections[i].sock_fd;
+                pfds[i].events = POLLIN | POLLOUT;
+                fprintf(stderr, "Reestablished connection %d\n", i);
+            }
+        }
+    }
+      queue_pending_requests();
         // Handle all connections
         for (int i = 0; i < num_connections; i++) {
             if (pfds[i].fd == -1) continue;
@@ -773,18 +809,18 @@ int main(int argc, char *argv[]) {
         queue_pending_requests();
 
         // Check if we're done
-        if (resource_count > 0) {
-            all_done = true;
-            for (int i = 0; i < resource_count; i++) {
-                if (resources[i].state == RESOURCE_PENDING) {
-                    all_done = false;
-                    break;
-                }
-            }
-            if (all_done) {
-                fprintf(stderr, "All resources downloaded!\n");
-            }
+if (resource_count > 0) {
+    all_done = true;
+    for (int i = 0; i < resource_count; i++) {
+        if (resources[i].state == RESOURCE_PENDING) {
+            all_done = false;
+            break;
         }
+    }
+    if (all_done) {
+        fprintf(stderr, "All resources processed!\n");
+    }
+}
     }
 
     // Cleanup
