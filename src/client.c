@@ -915,7 +915,7 @@ int main(int argc, char *argv[])
                     // Connection closed by server
                     fprintf(stderr, "Connection %d closed by server\n", i);
                     close_connection(&connections[i]);
-                    pfds[i].fd = -2;
+                    pfds[i].fd = -1;
                 }
                 else if (errno != EAGAIN && errno != EWOULDBLOCK)
                 {
