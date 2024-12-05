@@ -109,8 +109,10 @@ char *get_header_value(const Request *request, const char *header_name) {
 
 bool write_all(int client_fd, const char *buffer, size_t length) {
     size_t total_written = 0;
+    fprintf(stderr,"the length is %ld\n",length);
     while (total_written < length) {
         ssize_t bytes_written = write(client_fd, buffer + total_written, length - total_written);
+        fprintf(stderr,"the bytes written is %ld\n",bytes_written);
         if (bytes_written > 0) {
             total_written += bytes_written;
         } else if (bytes_written == 0) {
@@ -483,7 +485,7 @@ int main(int argc, char *argv[]) {
     while (true) {
         int poll_count = poll(fds, nfds, CONNECTION_TIMEOUT * 1000);
         if (poll_count == -1) {
-            perror("Poll failed");
+            fprintf(stderr,"Poll failed");
             break;
         }
 
@@ -542,6 +544,7 @@ int main(int argc, char *argv[]) {
     }
 
     close(server_fd);
+    fprintf(stderr, "Server closed\n");
 
     return EXIT_SUCCESS;
 }

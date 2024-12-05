@@ -50,7 +50,8 @@ typedef enum
     RESOURCE_PENDING,
     RESOURCE_NOT_FOUND,
     RESOURCE_ERROR,
-    RESOURCE_DOWNLOADED
+    RESOURCE_DOWNLOADED,
+    RESOURCE_IN_PROGRESS,
 } ResourceState;
 
 typedef enum
@@ -197,10 +198,6 @@ void close_connection(Connection *conn)
 
 test_error_code_t setup_connection(Connection *conn, struct sockaddr_in server_addr)
 {
-    if (conn->sock_fd != -1)
-    {
-        close(conn->sock_fd);
-    }
 
     conn->sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (conn->sock_fd < 0)
@@ -629,7 +626,11 @@ test_error_code_t process_response(Connection *conn)
 
         if (state->headers_parsed)
         {
+
             size_t total_response_size = buffer_offset + state->content_length;
+            printf("buffer offset size: %ld\n", buffer_offset);
+            fprintf(stderr, "Total response size: %ld\n", total_response_size);
+
             if (state->buffer_size >= total_response_size)
             {
                 // A complete response is available
@@ -665,6 +666,7 @@ test_error_code_t process_response(Connection *conn)
                         }
                         else
                         {
+
                             // Save the file
                             save_file(current_uri, body, body_length);
 
@@ -705,11 +707,26 @@ test_error_code_t process_response(Connection *conn)
                 state->content_length = 0;
 
                 buffer_offset += body_length;
+                conn->processing_response = false;
             }
             else
             {
+                //conn->processing_response = true;
+                conn->processing_response = true;
+                char *current_uri = conn->inflight_requests[0];
+                for (int i = 0; i < resource_count; i++)
+                {
+                    if (strcmp(resources[i].uri, current_uri) == 0)
+                    {
+                        resources[i].state = RESOURCE_IN_PROGRESS;
+                        resources[i].requested = true;
+                        fprintf(stderr, "Marked resource %s as  In_Progress\n", current_uri);
+                        break;
+                    }
+                }
+
                 // Incomplete body; stop processing
-                break;
+                return TEST_ERROR_NONE;
             }
         }
     }
@@ -717,6 +734,7 @@ test_error_code_t process_response(Connection *conn)
     // Remove processed data from the buffer
     if (buffer_offset > 0)
     {
+
         memmove(state->buffer, state->buffer + buffer_offset, state->buffer_size - buffer_offset);
         state->buffer_size -= buffer_offset;
     }
@@ -733,7 +751,7 @@ void monitor_connections()
         Connection *conn = &connections[i];
 
         if (conn->state == CONNECTION_STATE_CONNECTED &&
-            current_time - conn->last_activity > POLL_TIMEOUT / 1000)
+            current_time - conn->last_activity > POLL_TIMEOUT / 1000 && !conn->processing_response);
         {
 
             fprintf(stderr, "Connection %d timed out, resetting\n", i);
@@ -774,11 +792,13 @@ int main(int argc, char *argv[])
     {
         if (setup_connection(&connections[i], server_addr) != TEST_ERROR_NONE)
         {
-            fprintf(stderr, "Failed to setup connection %d\n", i);
+            fprintf(stderr, "Init Failed to setup connection %d\n", i);
+            // exit(0);
             continue;
         }
         pfds[i].fd = connections[i].sock_fd;
         pfds[i].events = POLLIN | POLLOUT;
+        fprintf(stderr, "Initialized connection %d fd is %d\n", i,pfds[i].fd );
     }
 
     // Initialize resources[] with /dependency.csv
@@ -816,12 +836,12 @@ int main(int argc, char *argv[])
     bool all_done = false;
     while (!all_done)
     {
-        monitor_connections();
+        //monitor_connections();
 
         int poll_result = poll(pfds, num_connections, POLL_TIMEOUT);
         if (poll_result < 0)
         {
-            perror("poll failed");
+            fprintf(stderr, "poll failed");
             break;
         }
         // Try to reestablish failed connections
@@ -879,13 +899,16 @@ int main(int argc, char *argv[])
             }
             if (pfds[i].revents & POLLIN)
             {
+
                 ResponseState *state = &connections[i].response;
 
                 char buf[BUF_SIZE];
                 ssize_t bytes_read = read(pfds[i].fd, buf, sizeof(buf));
+                fprintf(stderr, "bytes read is %ld\n", bytes_read);
 
                 if (bytes_read > 0)
                 {
+
                     // Expand the buffer to hold new data
                     char *new_buffer = realloc(state->buffer, state->buffer_size + bytes_read);
                     if (!new_buffer)
@@ -897,6 +920,7 @@ int main(int argc, char *argv[])
 
                     memcpy(state->buffer + state->buffer_size, buf, bytes_read);
                     state->buffer_size += bytes_read;
+                    fprintf(stderr, "buffer size is %ld\n", state->buffer_size);
 
                     // Process the response(s)
                     test_error_code_t result = process_response(&connections[i]);
@@ -949,6 +973,7 @@ int main(int argc, char *argv[])
         }
 
         queue_pending_requests();
+        fprintf(stderr, "resource count is %d\n", resource_count);
 
         // Check if we're done
         if (resource_count > 0)
@@ -956,7 +981,7 @@ int main(int argc, char *argv[])
             all_done = true;
             for (int i = 0; i < resource_count; i++)
             {
-                if (resources[i].state == RESOURCE_PENDING)
+                if (resources[i].state == RESOURCE_PENDING || resources[i].state == RESOURCE_IN_PROGRESS)
                 {
                     all_done = false;
                     break;
