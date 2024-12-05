@@ -42,7 +42,7 @@
 #endif
 
 #ifndef MAX_INFLIGHT_REQUESTS
-#define MAX_INFLIGHT_REQUESTS 6
+#define MAX_INFLIGHT_REQUESTS 4
 #endif
 
 typedef enum
@@ -580,14 +580,26 @@ test_error_code_t process_response(Connection *conn)
     // Loop to process all complete responses in the buffer
     while (buffer_offset < state->buffer_size)
     {
-        if (!state->headers_parsed)
-        {
             // Look for the end of the headers
             char *headers_end = portable_memmem(state->buffer + buffer_offset, state->buffer_size - buffer_offset, "\r\n\r\n", 4);
             if (!headers_end)
             {
                 // Incomplete headers; stop processing
-                break;
+                conn->processing_response = true;
+                char *current_uri = conn->inflight_requests[0];
+                for (int i = 0; i < resource_count; i++)
+                {
+                    if (strcmp(resources[i].uri, current_uri) == 0)
+                    {
+                        resources[i].state = RESOURCE_IN_PROGRESS;
+                        resources[i].requested = true;
+                        fprintf(stderr, "Marked resource %s as  In_Progress\n", current_uri);
+                        break;
+                    }
+                }
+
+                // Incomplete body; stop processing
+                return TEST_ERROR_NONE;
             }
 
             size_t headers_length = headers_end - (state->buffer + buffer_offset) + 4;
@@ -598,7 +610,21 @@ test_error_code_t process_response(Connection *conn)
             if (!status_end || status_end > headers_end)
             {
                 // Incomplete status line; stop processing
-                break;
+                conn->processing_response = true;
+                char *current_uri = conn->inflight_requests[0];
+                for (int i = 0; i < resource_count; i++)
+                {
+                    if (strcmp(resources[i].uri, current_uri) == 0)
+                    {
+                        resources[i].state = RESOURCE_IN_PROGRESS;
+                        resources[i].requested = true;
+                        fprintf(stderr, "Marked resource %s as  In_Progress\n", current_uri);
+                        break;
+                    }
+                }
+
+                // Incomplete body; stop processing
+                return TEST_ERROR_NONE;
             }
 
             size_t status_len = status_end - (state->buffer + buffer_offset);
@@ -607,7 +633,21 @@ test_error_code_t process_response(Connection *conn)
 
             if (sscanf(status_line, "HTTP/1.%*d %d", &state->status_code) != 1)
             {
-                return TEST_ERROR_PARSE_FAILED;
+                conn->processing_response = true;
+                char *current_uri = conn->inflight_requests[0];
+                for (int i = 0; i < resource_count; i++)
+                {
+                    if (strcmp(resources[i].uri, current_uri) == 0)
+                    {
+                        resources[i].state = RESOURCE_IN_PROGRESS;
+                        resources[i].requested = true;
+                        fprintf(stderr, "Marked resource %s as  In_Progress\n", current_uri);
+                        break;
+                    }
+                }
+
+                // Incomplete body; stop processing
+                return TEST_ERROR_NONE;
             }
 
             // Extract Content-Length
@@ -622,10 +662,9 @@ test_error_code_t process_response(Connection *conn)
             // Mark headers as parsed
             state->headers_parsed = true;
             buffer_offset += headers_length;
-        }
+        
 
-        if (state->headers_parsed)
-        {
+        
 
             size_t total_response_size = buffer_offset + state->content_length;
             printf("buffer offset size: %ld\n", buffer_offset);
@@ -708,10 +747,17 @@ test_error_code_t process_response(Connection *conn)
 
                 buffer_offset += body_length;
                 conn->processing_response = false;
+                if (buffer_offset > 0)
+                {
+
+                    memmove(state->buffer, state->buffer + buffer_offset, state->buffer_size - buffer_offset);
+                    state->buffer_size -= buffer_offset;
+                    buffer_offset = 0;
+                }
             }
             else
             {
-                //conn->processing_response = true;
+                // conn->processing_response = true;
                 conn->processing_response = true;
                 char *current_uri = conn->inflight_requests[0];
                 for (int i = 0; i < resource_count; i++)
@@ -728,16 +774,10 @@ test_error_code_t process_response(Connection *conn)
                 // Incomplete body; stop processing
                 return TEST_ERROR_NONE;
             }
-        }
+        
     }
 
     // Remove processed data from the buffer
-    if (buffer_offset > 0)
-    {
-
-        memmove(state->buffer, state->buffer + buffer_offset, state->buffer_size - buffer_offset);
-        state->buffer_size -= buffer_offset;
-    }
 
     return TEST_ERROR_NONE;
 }
@@ -751,7 +791,8 @@ void monitor_connections()
         Connection *conn = &connections[i];
 
         if (conn->state == CONNECTION_STATE_CONNECTED &&
-            current_time - conn->last_activity > POLL_TIMEOUT / 1000 && !conn->processing_response);
+            current_time - conn->last_activity > POLL_TIMEOUT / 1000 && !conn->processing_response)
+            ;
         {
 
             fprintf(stderr, "Connection %d timed out, resetting\n", i);
@@ -798,7 +839,7 @@ int main(int argc, char *argv[])
         }
         pfds[i].fd = connections[i].sock_fd;
         pfds[i].events = POLLIN | POLLOUT;
-        fprintf(stderr, "Initialized connection %d fd is %d\n", i,pfds[i].fd );
+        fprintf(stderr, "Initialized connection %d fd is %d\n", i, pfds[i].fd);
     }
 
     // Initialize resources[] with /dependency.csv
@@ -836,7 +877,7 @@ int main(int argc, char *argv[])
     bool all_done = false;
     while (!all_done)
     {
-        //monitor_connections();
+        // monitor_connections();
 
         int poll_result = poll(pfds, num_connections, POLL_TIMEOUT);
         if (poll_result < 0)
